@@ -97,7 +97,7 @@ The dashboard is a separate HTTP server that runs independently of OpenCode. Sta
 opencode-meter --serve
 ```
 
-Open http://127.0.0.1:9393 in your browser.
+Open http://127.0.0.1:9393 in your browser. To use another port, pass `--port N` or set `$OPENCODE_METER_PORT` (the Vite dev proxy reads the same variable).
 
 The server stays alive when OpenCode closes. You can background it with `nohup`, `screen`, `tmux`, or `launchd`. The plugin itself only initializes the database and collector hooks, it does not start the HTTP server.
 
@@ -108,7 +108,7 @@ The CLI reads directly from the SQLite database and outputs to stdout:
 ```bash
 opencode-meter --json      # Full metrics as JSON
 opencode-meter --summary   # Per-model cost/tokens table
-opencode-meter --serve     # Start dashboard HTTP server (port 9393)
+opencode-meter --serve     # Start dashboard HTTP server (default port 9393; override with --port N or $OPENCODE_METER_PORT)
 opencode-meter --prune --days 90 --dry-run   # Show what would be deleted
 opencode-meter --prune --days 90             # Delete old raw events, then VACUUM
 opencode-meter             # Show help message
@@ -229,7 +229,7 @@ bun run typecheck  # tsc --noEmit
 
 ## Troubleshooting
 
-**Port conflict.** The port is fixed at 9393. If it is already in use, `--serve` fails to bind with `EADDRINUSE`. Check whether a dashboard is already running (`curl -sI http://127.0.0.1:9393/api/health | grep x-opencode-meter`), and either kill that process or change `PORT` in `src/api/app.ts` — keeping the Vite dev proxy in `vite.config.ts` in sync.
+**Port conflict.** The default port is 9393. If it is already in use, `--serve` fails to bind with `EADDRINUSE`. Check whether a dashboard is already running (`curl -sI http://127.0.0.1:9393/api/health | grep x-opencode-meter`), and either kill that process or run the dashboard on another port with `--serve --port N` (or `$OPENCODE_METER_PORT`, which the Vite dev proxy also reads, so dev and served builds agree).
 
 **Additions and deletions look too high on old sessions.** Until this was fixed, the collector summed every `session.diff` event. OpenCode re-sends the session's cumulative snapshot diff on each edit, so a file already counted was counted again on every subsequent edit. Sessions recorded before the fix keep their inflated `additions`/`deletions`; there is no automatic repair. Sessions recorded after it are correct, and the totals are now derived from the stored events, so a session that ends more than once no longer accumulates.
 
