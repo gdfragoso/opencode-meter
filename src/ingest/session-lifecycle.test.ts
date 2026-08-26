@@ -72,6 +72,28 @@ describe("createSessionLifecycle", () => {
     db.close();
   });
 
+  test("onSessionEnd transitions a running session when the full persist fails", () => {
+    const db = new Database(":memory:");
+    initSchema(db);
+    const lifecycle = createSessionLifecycle(db);
+    const startedAt = Date.now() - 1000;
+    lifecycle.onSessionCreated!({ sessionID: "persist-failure", startedAt });
+    lifecycle.onSessionActive!({ sessionID: "persist-failure" });
+    db.run(`CREATE TRIGGER reject_session_persist BEFORE INSERT ON sessions
+      WHEN NEW.id = 'persist-failure'
+      BEGIN SELECT RAISE(ABORT, 'simulated persist failure'); END`);
+
+    lifecycle.onSessionEnd!(emptySessionData("persist-failure", startedAt));
+
+    const row = db
+      .query("SELECT status, ended_at, duration_ms FROM sessions WHERE id = ?")
+      .get("persist-failure") as { status: string; ended_at: number | null; duration_ms: number };
+    expect(row.status).toBe("idle");
+    expect(row.ended_at).toBeNumber();
+    expect(row.duration_ms).toBe(0);
+    db.close();
+  });
+
   test("onEvent inserts an event row", () => {
     const db = new Database(":memory:");
     initSchema(db);

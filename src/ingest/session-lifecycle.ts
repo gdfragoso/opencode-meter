@@ -52,6 +52,14 @@ export function createSessionLifecycle(
         rollups.schedule(completionDate.toISOString().slice(0, 10));
       } catch (err) {
         logger.error("Failed to persist session", { error: errString(err) });
+        try {
+          db.run(
+            "UPDATE sessions SET status = ?, ended_at = ?, duration_ms = ? WHERE id = ?",
+            [sessionData.status, Date.now(), sessionData.durationMs, sessionData.sessionID],
+          );
+        } catch (fallbackErr) {
+          logger.error("Failed to finalize session after persistence error", { error: errString(fallbackErr) });
+        }
       }
     },
     onEvent: (sessionID: string, type: string, data: Record<string, unknown>) => {
