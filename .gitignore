@@ -1,0 +1,8 @@
+node_modules/
+*.db
+*.jsonl
+*.js
+!package.json
+dist/
+.omo/
+.playwright-mcp/

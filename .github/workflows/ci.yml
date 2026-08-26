@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run build
+      - name: Test + coverage check
+        run: |
+          OUTPUT=$(bun test --coverage 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          COVERAGE=$(echo "$OUTPUT" | grep '^All files' | awk '{gsub(/%/,"",$6); print $6}')
+          if [ -z "$COVERAGE" ] || [ "$COVERAGE" = "0" ]; then
+            echo "❌ Could not parse coverage output"
+            exit 1
+          fi
+          echo "Line coverage: ${COVERAGE}%"
+          # 60, not the old 80. The old number covered only what the tests
+          # imported, which was the backend — the ~4.5k lines of dashboard were
+          # not in the denominator at all. Now that the dashboard has tests it
+          # counts too, so the percentage fell while the covered lines went up.
+          # Ratchet this upward as dashboard coverage grows; never downward.
+          THRESHOLD=60
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "❌ Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+            exit 1
+          fi
+          echo "✅ Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+          exit $EXIT_CODE

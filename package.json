@@ -1,0 +1,66 @@
+{
+  "name": "opencode-meter",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "plugin.ts",
+  "bin": {
+    "opencode-meter": "src/cli.ts"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "plugin.ts",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "oc-plugin": ["server"],
+  "engines": {
+    "opencode": ">=1.4.3"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "cli": "bun run src/cli.ts",
+    "cli:json": "bun run src/cli.ts --json",
+    "cli:summary": "bun run src/cli.ts --summary",
+    "cli:serve": "bun run src/cli.ts --serve",
+    "cli:prune": "bun run src/cli.ts --prune",
+    "link": "bun link --force",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.4.3",
+    "chart.js": "^4.4.3",
+    "hono": "^4.5.0",
+    "react": "^19.0.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.18.2",
+    "tailwindcss": "^4.0.0"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.6",
+    "@semantic-release/commit-analyzer": "^13.0.0",
+    "@semantic-release/github": "^11.0.0",
+    "@semantic-release/npm": "^12.0.0",
+    "@semantic-release/release-notes-generator": "^14.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "bun-types": "^1.1.0",
+    "oxlint": "^1.80.0",
+    "semantic-release": "^24.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

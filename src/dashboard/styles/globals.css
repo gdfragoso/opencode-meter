@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cyber-bg: #0a0a0f;
+  --color-cyber-cyan: #00ffcc;
+  --color-cyber-magenta: #ff00ff;
+  --color-cyber-purple: #a855f7;
+  --color-cyber-danger: #ff4466;
+
+  --font-family-mono: "Share Tech Mono", monospace;
+}
+
+body {
+  background-color: var(--color-cyber-bg);
+  color: var(--color-cyber-cyan);
+  font-family: var(--font-family-mono);
+}
