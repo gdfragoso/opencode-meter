@@ -7,8 +7,6 @@
 
 Session metrics plugin for OpenCode. Tracks tokens, cost, tools, and agents into SQLite, with a Hono REST API and React dashboard.
 
-![Screenshot](screenshots/dashboard.png)
-
 ## Features
 
 - **Automatic collection** -- hooks into OpenCode's session, message, and tool lifecycle. No configuration needed.
