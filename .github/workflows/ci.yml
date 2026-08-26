@@ -6,16 +6,49 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun run build
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
       - name: Test + coverage check
         run: |
           OUTPUT=$(bun test --coverage 2>&1)
@@ -39,3 +72,26 @@ jobs:
           fi
           echo "✅ Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
           exit $EXIT_CODE
+
+  release:
+    needs: [lint-typecheck, build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: npx semantic-release
