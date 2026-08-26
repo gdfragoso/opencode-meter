@@ -25,7 +25,9 @@ Session metrics plugin for OpenCode. Tracks tokens, cost, tools, and agents into
 
 ## Quick Start
 
-Install the plugin by adding it to your OpenCode configuration:
+This package ships two installable components, the OpenCode plugin and the `opencode-meter` CLI. Install both.
+
+1) Install the OpenCode plugin (metrics collector)
 
 ```jsonc
 // ~/.config/opencode/opencode.jsonc
@@ -34,7 +36,17 @@ Install the plugin by adding it to your OpenCode configuration:
 }
 ```
 
-OpenCode loads the plugin on next startup. The plugin initializes the database and collector hooks automatically. It does not start the HTTP server -- that is handled separately (see Dashboard Usage below).
+OpenCode loads the plugin on next startup. The plugin initializes the database and collector hooks automatically. It does not start the HTTP server, and it does not install the `opencode-meter` command.
+
+2) Install the `opencode-meter` CLI (dashboard plus commands)
+
+```bash
+npm install -g opencode-meter
+```
+
+The CLI reads from the SQLite database and provides `opencode-meter --serve` for the dashboard.
+
+Troubleshooting: if you see `command not found: opencode-meter`, install the CLI with `npm install -g opencode-meter`.
 
 ## Alternative Install
 
@@ -46,21 +58,40 @@ cd ~/.config/opencode/plugins/opencode-meter
 bun install
 ```
 
-The `postinstall` script runs `bun link --force`, making the `opencode-meter` command available globally.
+Now make the `opencode-meter` command available globally:
+
+```bash
+bun link --force
+# or, if you prefer npm
+npm install -g .
+```
 
 ## Updating
 
-If installed via `opencode.jsonc`, change the version string in the plugin entry (or omit it to always use the latest). If cloned from git:
+Plugin (collector)
+
+If installed via `opencode.jsonc`, change the version string in the plugin entry (or omit it to always use the latest).
+
+CLI (dashboard plus commands)
+
+Update from npm:
+
+```bash
+npm update -g opencode-meter
+```
+
+If you keep a git checkout and want the CLI updated from it:
 
 ```bash
 cd ~/.config/opencode/plugins/opencode-meter
 git pull
 bun install
+bun link --force
 ```
 
 ## Dashboard Usage
 
-The dashboard is a separate HTTP server that runs independently of OpenCode. Start it in a terminal:
+The dashboard is a separate HTTP server that runs independently of OpenCode. Start it in a terminal. This requires the CLI installed (Quick Start step 2):
 
 ```bash
 opencode-meter --serve
@@ -68,7 +99,7 @@ opencode-meter --serve
 
 Open http://127.0.0.1:9393 in your browser.
 
-The server stays alive when OpenCode closes. You can background it with `nohup`, `screen`, `tmux`, or `launchd`. The plugin itself only initializes the database and collector hooks -- it does not start the HTTP server.
+The server stays alive when OpenCode closes. You can background it with `nohup`, `screen`, `tmux`, or `launchd`. The plugin itself only initializes the database and collector hooks, it does not start the HTTP server.
 
 ## CLI Usage
 
