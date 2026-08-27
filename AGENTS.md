@@ -49,6 +49,7 @@ Top-level folders under `src/` answer **who runs this and when**:
 | Delegation tree | `src/data/repositories/session.ts` | findSessionTreeRows() — recursive walk down parent_id *and* child_session_ids |
 | Cost per result | `src/api/services/cost.ts` | Denominators from session_files (action <> 'read'); ratios are null, never 0, when nothing was produced |
 | Period comparison | `src/api/services/comparison.ts` | Half-open [from, to) windows so the boundary session is counted once; pct is null when the earlier window was empty |
+| Cache over time | `src/api/services/cache-timeline.ts` | Series aligned to a shared `dates` array; a null rate is "not used", never 0%; caps at 6 models and reports the count omitted |
 | File activity classification | `src/collector/file-activity.ts` | Classifies tool calls into read/created/modified/deleted |
 | Session state model | `src/collector/session-state.ts` | createSessionState(), SessionData interface |
 | DB schema | `src/data/db/migrations.ts` | CREATE TABLE IF NOT EXISTS sessions/events/daily |

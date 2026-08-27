@@ -15,6 +15,7 @@ import projectsRoute from "./routes/projects";
 import filesRoute from "./routes/files";
 import costRoute from "./routes/cost";
 import comparisonRoute from "./routes/comparison";
+import cacheTimelineRoute from "./routes/cache-timeline";
 
 export const DEFAULT_PORT = 9393;
 
@@ -56,6 +57,7 @@ export function createApp(): Hono {
   app.route("/", filesRoute);
   app.route("/", costRoute);
   app.route("/", comparisonRoute);
+  app.route("/", cacheTimelineRoute);
 
   const distDir = join(import.meta.dir, "..", "..", "dist");
   app.use("/assets/*", serveStatic({ root: distDir }));

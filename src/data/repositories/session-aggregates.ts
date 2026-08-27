@@ -213,3 +213,46 @@ export function findPeriodTotals(
     activeDays: row?.activeDays ?? 0,
   };
 }
+
+/* ── cache efficiency over time ──────────────────────────────────────────
+   One row per (day, model). Grouped on `date(started_at)`, which is not
+   sargable — but the WHERE filter is on bare `started_at`, so the index still
+   picks the rows and the date function only runs on what survives.
+   ─────────────────────────────────────────────────────────────────────── */
+
+export interface DailyModelCacheRow {
+  date: string;
+  model_id: string;
+  provider_id: string;
+  cacheRead: number;
+  input: number;
+  tokens: number;
+}
+
+export function findDailyModelCache(
+  db: Database,
+  days: number | null = null,
+  project: string | null = null,
+  branch: string | null = null
+): DailyModelCacheRow[] {
+  const cutoff = days !== null ? Date.now() - days * 86400000 : 0;
+
+  return db
+    .query<DailyModelCacheRow, [number | null, number, string | null, string | null, string | null, string | null]>(
+      `SELECT date(started_at / 1000, 'unixepoch') AS date,
+              COALESCE(model_id, '') AS model_id,
+              COALESCE(provider_id, '') AS provider_id,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
+              COALESCE(SUM(input_tokens), 0) AS input,
+              COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens), 0) AS tokens
+         FROM sessions
+        WHERE model_id IS NOT NULL
+          AND started_at IS NOT NULL
+          AND (? IS NULL OR started_at >= ?)
+          AND (? IS NULL OR directory = ?)
+          AND (? IS NULL OR branch = ?)
+        GROUP BY date, model_id, provider_id
+        ORDER BY date, model_id`
+    )
+    .all(days, cutoff, project, project, branch, branch);
+}

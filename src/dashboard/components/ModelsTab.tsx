@@ -3,6 +3,8 @@ import { Bar } from "react-chartjs-2";
 import ModelCards from "@/dashboard/components/ModelCards";
 import { Section, LoadingPlaceholder, EmptyState } from "@/dashboard/components/ui";
 import { useModels } from "@/dashboard/hooks/useModels";
+import { useCacheTimeline } from "@/dashboard/hooks/useCacheTimeline";
+import CacheTimelineChart from "@/dashboard/components/CacheTimelineChart";
 import { fmtNum, fmtUSD, fmtDur } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, yellow, bg } from "@/dashboard/lib/colors";
 import type { ModelAggregateRow } from "@/data/domain/event";
@@ -311,6 +313,7 @@ function ModelComparisonChart({ models }: { models: ModelInfo[] }) {
 
 export default function ModelsTab() {
   const { data: modelsData, loading, error } = useModels();
+  const { data: cacheTimeline, loading: cacheTimelineLoading } = useCacheTimeline();
   const [providerFilter, setProviderFilter] = useState("all");
 
   // `modelsData?.models ?? []` built a new array on every render, so both
@@ -403,6 +406,12 @@ export default function ModelsTab() {
           onChange={setProviderFilter}
         />
         <ModelComparisonChart models={filteredModels} />
+      </Section>
+
+      {/* Cache hit rate per model, day by day — a prompt change that stops the
+          cache from being reused shows up here before it shows up in the bill. */}
+      <Section title="Cache Efficiency Over Time">
+        <CacheTimelineChart data={cacheTimeline} loading={cacheTimelineLoading} />
       </Section>
 
       {/* Models table */}

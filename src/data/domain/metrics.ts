@@ -115,3 +115,26 @@ export interface PeriodComparisonResponse {
   previous: PeriodSnapshot | null;
   deltas: PeriodDeltas | null;
 }
+
+/** One model's cache hit rate across a series of days. */
+export interface CacheTimelineSeries {
+  model_id: string;
+  provider_id: string;
+  /** Total tokens over the window — what the series is ranked by. */
+  tokens: number;
+  /** Hit rate over the whole window; null when the model read nothing. */
+  overallRate: number | null;
+  /**
+   * One entry per date in `CacheTimelineResponse.dates`, same order. Null means
+   * the model was not used that day — not that its hit rate was zero.
+   */
+  rates: Array<number | null>;
+}
+
+export interface CacheTimelineResponse {
+  /** Days that have data, ascending, as `YYYY-MM-DD`. */
+  dates: string[];
+  series: CacheTimelineSeries[];
+  /** Models left out to keep the chart readable. Never silently dropped. */
+  omittedModels: number;
+}

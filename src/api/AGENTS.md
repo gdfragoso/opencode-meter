@@ -33,7 +33,8 @@ api/
 │   ├── projects.ts    # GET /api/projects + GET /api/projects/:directory
 │   ├── files.ts       # GET /api/sessions/:id/files
 │   ├── cost.ts        # GET /api/cost-efficiency?days=&project=&branch=
-│   └── comparison.ts  # GET /api/period-comparison?days=&project=&branch=
+│   ├── comparison.ts  # GET /api/period-comparison?days=&project=&branch=
+│   └── cache-timeline.ts # GET /api/models/cache-timeline?days=&project=&branch=
 └── services/          # read-side query composition over @/data/repositories
     ├── metrics.ts     # getSummary — top models, agents, tokens
     ├── sessions.ts    # session list/detail
