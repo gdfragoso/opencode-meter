@@ -185,17 +185,25 @@ function distributeStepTokens(tools: ToolCall[], steps: StepWindow[]): Map<strin
   return agg;
 }
 
-// Sliding-window sweep: O(T + S) vs the previous O(T × S) nested loop, which
-// blocked the event loop for seconds on large event sets. Both inputs are
-// sorted by start here; callers pass unordered arrays. Accumulates into `agg`
-// so one map collects every session's contribution, keyed by tool name.
+/**
+ * Splits one session's step cost across its tool calls.
+ *
+ * Sweeps the timeline instead of visiting each (tool, step) pair. At every
+ * instant the step's cost accrues at a constant rate, and that instant's share
+ * is divided among the tool calls actually running then — which is the whole
+ * point: OpenCode runs tools in parallel, and charging each concurrent call the
+ * full slice made a $10 step report $10 to every tool that overlapped it. Two
+ * parallel calls turned $10 into $20.
+ *
+ * Time inside a step with no tool running is left unattributed. That is the
+ * model working: it is the assistant thinking, not a tool call, and inventing
+ * an owner for it would inflate the column again.
+ *
+ * O((T + S) log (T + S)) for the sort, then one pass over the boundaries.
+ */
 function sweepSession(tools: ToolCall[], steps: StepWindow[], agg: Map<string, ToolAggregate>): void {
-  const sortedSteps = [...steps].sort((a, b) => a.step_start - b.step_start);
-  const sortedTools = [...tools].sort((a, b) => a.tool_start - b.tool_start);
-
-  let lo = 0;
-  let hi = 0;
-  for (const t of sortedTools) {
+  // Counts and durations are per call and independent of cost attribution.
+  for (const t of tools) {
     let a = agg.get(t.tool);
     if (!a) {
       a = { calls: 0, total_dur: 0, tokens: 0, cost: 0 };
@@ -203,30 +211,63 @@ function sweepSession(tools: ToolCall[], steps: StepWindow[], agg: Map<string, T
     }
     a.calls++;
     a.total_dur += t.duration_ms;
+  }
 
-    const toolDur = t.tool_end - t.tool_start;
-    if (toolDur <= 0) continue;
+  const spans = tools.filter((t) => t.tool_end > t.tool_start);
+  const windows = steps.filter((s) => s.step_end > s.step_start);
+  if (spans.length === 0 || windows.length === 0) return;
 
-    // Exclusive window end: first step that starts at/after the tool ends.
-    while (hi < sortedSteps.length && sortedSteps[hi].step_start < t.tool_end) hi++;
-    // Inclusive window start: first step that ends after the tool starts.
-    while (lo < sortedSteps.length && sortedSteps[lo].step_end <= t.tool_start) lo++;
-    // steps[lo..hi) are exactly the steps overlapping this tool (lo <= hi by monotonicity).
+  interface Boundary {
+    ts: number;
+    isTool: boolean;
+    index: number;
+    opening: boolean;
+  }
 
-    for (let i = lo; i < hi; i++) {
-      const s = sortedSteps[i];
-      const stepDur = s.step_end - s.step_start;
-      if (stepDur <= 0) continue;
+  const boundaries: Boundary[] = [];
+  spans.forEach((t, index) => {
+    boundaries.push({ ts: t.tool_start, isTool: true, index, opening: true });
+    boundaries.push({ ts: t.tool_end, isTool: true, index, opening: false });
+  });
+  windows.forEach((s, index) => {
+    boundaries.push({ ts: s.step_start, isTool: false, index, opening: true });
+    boundaries.push({ ts: s.step_end, isTool: false, index, opening: false });
+  });
 
-      const overlapStart = Math.max(t.tool_start, s.step_start);
-      const overlapEnd = Math.min(t.tool_end, s.step_end);
-      const overlap = overlapEnd - overlapStart;
-      if (overlap <= 0) continue;
+  // Close before open at the same instant: a call ending exactly as another
+  // starts was never concurrent with it, and treating them as overlapping would
+  // halve both their shares.
+  boundaries.sort((a, b) => a.ts - b.ts || Number(a.opening) - Number(b.opening));
 
-      const ratio = overlap / stepDur;
-      a.tokens += ratio * s.tokens;
-      a.cost += ratio * s.cost;
+  const openTools = new Set<number>();
+  const openSteps = new Set<number>();
+  let previous = boundaries[0]!.ts;
+
+  for (const boundary of boundaries) {
+    const elapsed = boundary.ts - previous;
+    if (elapsed > 0) {
+      if (openTools.size > 0 && openSteps.size > 0) {
+        let cost = 0;
+        let tokens = 0;
+        for (const index of openSteps) {
+          const s = windows[index]!;
+          const fraction = elapsed / (s.step_end - s.step_start);
+          cost += fraction * s.cost;
+          tokens += fraction * s.tokens;
+        }
+        const share = 1 / openTools.size;
+        for (const index of openTools) {
+          const a = agg.get(spans[index]!.tool)!;
+          a.cost += cost * share;
+          a.tokens += tokens * share;
+        }
+      }
+      previous = boundary.ts;
     }
+
+    const open = boundary.isTool ? openTools : openSteps;
+    if (boundary.opening) open.add(boundary.index);
+    else open.delete(boundary.index);
   }
 }
 

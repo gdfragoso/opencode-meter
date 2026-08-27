@@ -128,7 +128,9 @@ describe("findToolMetrics", () => {
     const now = Date.now();
     insertSessionTotals(db, "session-1", { input_tokens: 100, output_tokens: 50, total_cost: 0.123 });
 
-    // Step window (1ms) contained in every tool window below → ratio = 1.0
+    // Step window (1ms) contained in every tool window below. All three calls
+    // are therefore running at the same instant, so they share the step's cost
+    // and tokens three ways rather than each taking the whole thing.
     insertEventRaw(db, now + 50, "session-1", "step.start", { step: 1 });
     insertEventRaw(db, now + 51, "session-1", "step.finish", {
       step: 1,
@@ -157,18 +159,24 @@ describe("findToolMetrics", () => {
     expect(toolA).toBeDefined();
     expect(toolA!.calls).toBe(2);
     expect(toolA!.avg_duration_ms).toBeCloseTo(150, 5);
-    // 2 calls × 1.0 overlap × 150 step tokens = 300
-    expect(toolA!.total_tokens).toBe(300);
-    // 2 calls × 1.0 overlap × 0.123 step cost = 0.246
-    expect(toolA!.total_cost).toBeCloseTo(0.246, 5);
+    // 2 of the 3 concurrent calls × 150 step tokens / 3 = 100.
+    // This asserted 300 until the concurrency fix — the old number was the bug:
+    // three calls over one 150-token step were reporting 450 between them.
+    expect(toolA!.total_tokens).toBe(100);
+    // 2/3 × 0.123 = 0.082
+    expect(toolA!.total_cost).toBeCloseTo(0.082, 5);
 
     expect(toolB).toBeDefined();
     expect(toolB!.calls).toBe(1);
     expect(toolB!.avg_duration_ms).toBeCloseTo(300, 5);
-    // 1 call × 1.0 overlap × 150 step tokens = 150
-    expect(toolB!.total_tokens).toBe(150);
-    // 1 call × 1.0 overlap × 0.123 step cost = 0.123
-    expect(toolB!.total_cost).toBeCloseTo(0.123, 5);
+    // 1 of the 3 concurrent calls × 150 step tokens / 3 = 50
+    expect(toolB!.total_tokens).toBe(50);
+    // 1/3 × 0.123 = 0.041
+    expect(toolB!.total_cost).toBeCloseTo(0.041, 5);
+
+    // And the three of them together account for the step exactly once.
+    expect(toolA!.total_tokens + toolB!.total_tokens).toBe(150);
+    expect(toolA!.total_cost + toolB!.total_cost).toBeCloseTo(0.123, 4);
   });
 
   it("distributes step tokens proportionally across multiple tool events in one session", () => {
@@ -616,5 +624,99 @@ describe("findToolMetrics attributes cost to the session that spent it", () => {
 
     expect(rows.find(r => r.tool === "read")!.total_cost).toBeCloseTo(4, 4);
     expect(rows.find(r => r.tool === "grep")!.total_cost).toBeCloseTo(6, 4);
+  });
+});
+
+describe("findToolMetrics splits a step between tools running at the same time", () => {
+  let db: Database;
+  const T = 1_700_000_000_000;
+
+  beforeEach(() => {
+    db = createTestDb();
+    insertSessionTotals(db, "s", { total_cost: 10 });
+    // One $10 step, one second long.
+    insertEventRaw(db, T, "s", "step.start", { step: 1 });
+    insertEventRaw(db, T + 1000, "s", "step.finish", { step: 1, cost: 10, tokens: { input: 1000, output: 0 } });
+  });
+
+  function tool(callID: string, name: string, start: number, end: number) {
+    insertEventRaw(db, start, "s", "tool.before", { tool: name, callID });
+    insertEventRaw(db, end, "s", "tool.after", { tool: name, callID });
+  }
+
+  const costOf = (name: string) => findToolMetrics(db).find(r => r.tool === name)!.total_cost;
+  const attributed = () => findToolMetrics(db).reduce((sum, r) => sum + r.total_cost, 0);
+
+  // OpenCode runs tools in parallel. Charging each concurrent call the full
+  // slice turned a $10 step into $20.
+  it("halves the step between two calls that run side by side", () => {
+    tool("c1", "read", T, T + 1000);
+    tool("c2", "grep", T, T + 1000);
+
+    expect(costOf("read")).toBeCloseTo(5, 4);
+    expect(costOf("grep")).toBeCloseTo(5, 4);
+    expect(attributed()).toBeCloseTo(10, 4);
+  });
+
+  it("never attributes more than the step actually cost, however many run at once", () => {
+    for (let i = 0; i < 6; i++) tool(`c${i}`, `tool-${i}`, T, T + 1000);
+
+    // Each row is rounded to four decimals on the way out, so six rows can
+    // land a fraction of a cent above the true total. The claim being tested is
+    // that it cannot exceed the step by a meaningful amount.
+    expect(attributed()).toBeLessThan(10.001);
+    expect(attributed()).toBeGreaterThan(9.999);
+  });
+
+  it("gives each call its own slice when they do not overlap", () => {
+    tool("c1", "read", T, T + 500);
+    tool("c2", "grep", T + 500, T + 1000);
+
+    expect(costOf("read")).toBeCloseTo(5, 4);
+    expect(costOf("grep")).toBeCloseTo(5, 4);
+  });
+
+  // A call ending exactly as another starts was never concurrent with it.
+  it("does not treat a call that ends where the next begins as overlapping", () => {
+    tool("c1", "read", T, T + 500);
+    tool("c2", "grep", T + 500, T + 1000);
+
+    expect(costOf("read")).toBeCloseTo(5, 4);
+  });
+
+  it("charges only the overlapping part when one call starts partway through another", () => {
+    tool("c1", "read", T, T + 1000);
+    tool("c2", "grep", T + 500, T + 1000);
+
+    // First half: read alone, $5. Second half: shared, $2.50 each.
+    expect(costOf("read")).toBeCloseTo(7.5, 4);
+    expect(costOf("grep")).toBeCloseTo(2.5, 4);
+  });
+
+  // Thinking time is not a tool call, and giving it an owner would inflate the
+  // column exactly the way the concurrency bug did.
+  it("leaves time with no tool running unattributed", () => {
+    tool("c1", "read", T + 250, T + 750);
+
+    expect(costOf("read")).toBeCloseTo(5, 4);
+    expect(attributed()).toBeCloseTo(5, 4);
+  });
+
+  it("splits tokens the same way it splits cost", () => {
+    tool("c1", "read", T, T + 1000);
+    tool("c2", "grep", T, T + 1000);
+
+    const rows = findToolMetrics(db);
+    expect(rows.find(r => r.tool === "read")!.total_tokens).toBe(500);
+    expect(rows.find(r => r.tool === "grep")!.total_tokens).toBe(500);
+  });
+
+  it("still counts every call and its duration", () => {
+    tool("c1", "read", T, T + 1000);
+    tool("c2", "read", T, T + 600);
+
+    const read = findToolMetrics(db).find(r => r.tool === "read")!;
+    expect(read.calls).toBe(2);
+    expect(read.avg_duration_ms).toBe(800);
   });
 });
