@@ -654,7 +654,7 @@ export default function SessionDetail() {
         ) : (
           <div className="grid gap-4">
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-cyber-cyan mb-2">Lidos</h4>
+              <h4 className="text-xs uppercase tracking-wider text-cyber-cyan mb-2">Read</h4>
               {(files.read ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo lido" />
               ) : (
@@ -672,7 +672,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-emerald-400 mb-2">Criados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-emerald-400 mb-2">Created</h4>
               {(files.created ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo criado" />
               ) : (
@@ -690,7 +690,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-amber-400 mb-2">Modificados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-amber-400 mb-2">Modified</h4>
               {(files.modified ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo modificado" />
               ) : (
@@ -708,7 +708,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-cyber-danger mb-2">Deletados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-cyber-danger mb-2">Deleted</h4>
               {(files.deleted ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo deletado" />
               ) : (
