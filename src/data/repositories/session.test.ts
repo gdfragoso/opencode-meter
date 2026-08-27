@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
 import { initSchema } from "@/data/db/migrations";
-import { findAll, upsert } from "@/data/repositories/session";
+import { findAll, findRootAncestorId, findSessionTreeRows, upsert } from "@/data/repositories/session";
 import type { SessionData } from "@/data/domain/collected";
 
 /* ── fixtures ──────────────────────────────────────────────────────────
@@ -35,15 +35,26 @@ export function insertSession(
     parentId?: string;
     directory?: string;
     branch?: string;
+    title?: string;
+    sessionType?: string;
+    /** Written verbatim, so a suite can also pass the legacy comma-separated form. */
+    childSessionIds?: string[] | string;
   } = {}
 ) {
+  const childSessionIds =
+    opts.childSessionIds === undefined
+      ? null
+      : Array.isArray(opts.childSessionIds)
+        ? JSON.stringify(opts.childSessionIds)
+        : opts.childSessionIds;
+
   db.run(
     `INSERT INTO sessions (
       id, started_at, messages_total, status, created_at,
       input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
       total_cost, tools_total, agent, model_id, provider_id, duration_ms, error_type, parent_id,
-      directory, branch
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      directory, branch, title, session_type, child_session_ids
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       startedAt,
@@ -65,6 +76,9 @@ export function insertSession(
       opts.parentId ?? null,
       opts.directory ?? null,
       opts.branch ?? null,
+      opts.title ?? null,
+      opts.sessionType ?? (opts.parentId ? "subagent" : "main"),
+      childSessionIds,
     ]
   );
 }
@@ -208,6 +222,139 @@ describe("session repository, day filtering and session_type", () => {
       );
 
       expect(sessionTypeOf(db, "root-1")).toBe("main");
+    });
+  });
+});
+
+describe("session repository delegation walk", () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    initSchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort();
+
+  describe("findSessionTreeRows", () => {
+    it("returns nothing for a session that is not in the table", () => {
+      expect(findSessionTreeRows(db, "ghost")).toEqual([]);
+    });
+
+    it("returns the root alone when it delegated to no one", () => {
+      insertSession(db, "root", NOW);
+
+      const rows = findSessionTreeRows(db, "root");
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.id).toBe("root");
+      expect(rows[0]!.depth).toBe(0);
+    });
+
+    it("descends through parent_id, one level per generation", () => {
+      insertSession(db, "root", NOW);
+      insertSession(db, "child", NOW + 1, { parentId: "root" });
+      insertSession(db, "grandchild", NOW + 2, { parentId: "child" });
+
+      const rows = findSessionTreeRows(db, "root");
+
+      expect(rows.map((r) => [r.id, r.depth])).toEqual([
+        ["root", 0],
+        ["child", 1],
+        ["grandchild", 2],
+      ]);
+    });
+
+    // The two links are written by different events and neither is complete on
+    // its own, so a child recorded only in the parent's list still has to show.
+    it("descends through child_session_ids when parent_id was never set", () => {
+      insertSession(db, "root", NOW, { childSessionIds: ["orphan"] });
+      insertSession(db, "orphan", NOW + 1);
+
+      expect(ids(findSessionTreeRows(db, "root"))).toEqual(["orphan", "root"]);
+    });
+
+    it("reads the legacy comma-separated child list too", () => {
+      insertSession(db, "root", NOW, { childSessionIds: "a,b" });
+      insertSession(db, "a", NOW + 1);
+      insertSession(db, "b", NOW + 2);
+
+      expect(ids(findSessionTreeRows(db, "root"))).toEqual(["a", "b", "root"]);
+    });
+
+    it("ignores ids in child_session_ids that have no session row", () => {
+      insertSession(db, "root", NOW, { childSessionIds: ["gone"] });
+
+      expect(ids(findSessionTreeRows(db, "root"))).toEqual(["root"]);
+    });
+
+    it("reports a session reached by both links once, at its shallowest depth", () => {
+      insertSession(db, "root", NOW, { childSessionIds: ["child"] });
+      insertSession(db, "child", NOW + 1, { parentId: "root" });
+
+      const rows = findSessionTreeRows(db, "root");
+
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === "child")!.depth).toBe(1);
+    });
+
+    it("stops at maxDepth", () => {
+      insertSession(db, "d0", NOW);
+      insertSession(db, "d1", NOW + 1, { parentId: "d0" });
+      insertSession(db, "d2", NOW + 2, { parentId: "d1" });
+      insertSession(db, "d3", NOW + 3, { parentId: "d2" });
+
+      expect(ids(findSessionTreeRows(db, "d0", 2))).toEqual(["d0", "d1", "d2"]);
+    });
+
+    // A corrupt parent_id chain must not turn the walk into a loop.
+    it("terminates on a cycle", () => {
+      insertSession(db, "a", NOW, { parentId: "b" });
+      insertSession(db, "b", NOW + 1, { parentId: "a" });
+
+      const rows = findSessionTreeRows(db, "a", 3);
+
+      expect(ids(rows)).toEqual(["a", "b"]);
+    });
+
+    it("does not climb above the requested session", () => {
+      insertSession(db, "root", NOW);
+      insertSession(db, "child", NOW + 1, { parentId: "root" });
+
+      expect(ids(findSessionTreeRows(db, "child"))).toEqual(["child"]);
+    });
+  });
+
+  describe("findRootAncestorId", () => {
+    it("returns null for a session that is not in the table", () => {
+      expect(findRootAncestorId(db, "ghost")).toBeNull();
+    });
+
+    it("returns the session itself when it has no parent", () => {
+      insertSession(db, "root", NOW);
+
+      expect(findRootAncestorId(db, "root")).toBe("root");
+    });
+
+    it("climbs to the top of the chain", () => {
+      insertSession(db, "root", NOW);
+      insertSession(db, "child", NOW + 1, { parentId: "root" });
+      insertSession(db, "grandchild", NOW + 2, { parentId: "child" });
+
+      expect(findRootAncestorId(db, "grandchild")).toBe("root");
+    });
+
+    // Pruned or never-recorded parents are common in a database that has been
+    // through --prune; the highest session that does exist is still useful.
+    it("stops at the highest session that exists when the chain is broken", () => {
+      insertSession(db, "child", NOW + 1, { parentId: "vanished" });
+      insertSession(db, "grandchild", NOW + 2, { parentId: "child" });
+
+      expect(findRootAncestorId(db, "grandchild")).toBe("child");
     });
   });
 });

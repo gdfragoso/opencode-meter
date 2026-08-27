@@ -21,6 +21,7 @@ api/
 ├── routes/
 │   ├── health.ts      # GET /health
 │   ├── sessions.ts    # GET /api/sessions?limit=&offset=&days=&search=&status=&project=&branch=
+│   │                  # GET /api/sessions/:id/tree — delegation tree + per-branch totals
 │   ├── summary.ts     # GET /api/summary
 │   ├── daily.ts       # GET /api/daily?days=
 │   ├── events.ts      # GET /api/events?session_id=

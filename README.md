@@ -184,6 +184,7 @@ This means the dashboard can stay running even when OpenCode is closed, and the 
 | GET | `/api/sessions` | List sessions (`?days=&search=&status=&limit=&offset=&project=&branch=`) | `sessions.ts` |
 | GET | `/api/sessions/types` | Main vs subagent breakdown (`?days=&project=&branch=`) | `sessions.ts` |
 | GET | `/api/sessions/:id` | Session detail with subagents | `sessions.ts` |
+| GET | `/api/sessions/:id/tree` | Delegation tree rooted at the session, with per-branch totals | `sessions.ts` |
 | GET | `/api/sessions/:id/events` | Raw events for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/tools` | Tool usage breakdown for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/files` | File activity per session (read/created/modified/deleted) | `files.ts` |

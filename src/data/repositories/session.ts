@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { SessionData } from "@/data/domain/collected";
-import type { SessionRow, SubagentRow } from "@/data/domain/session";
+import type { SessionRow, SubagentRow, SessionTreeRow } from "@/data/domain/session";
 
 export function upsertRunning(
   db: Database,
@@ -146,6 +146,113 @@ export function findChildrenByParentId(db: Database, parentId: string): SessionR
       "SELECT id, agent, model_id, input_tokens, output_tokens, tools_total, duration_ms, total_cost, status FROM sessions WHERE parent_id = ?"
     )
     .all(parentId);
+}
+
+/**
+ * How deep the delegation walk goes before it stops. A subagent that spawns a
+ * subagent is already rare; six levels is well past anything observed and keeps
+ * a corrupt `parent_id` cycle from turning the query into a loop.
+ */
+export const SESSION_TREE_MAX_DEPTH = 6;
+
+/**
+ * `child_session_ids` as a JSON array, whatever it is stored as.
+ *
+ * `upsert` writes a JSON array, but databases written by early versions hold a
+ * comma-separated string, and `getSessionDetail` still reads those — a walk that
+ * only understood JSON would show fewer subagents in the tree than in the flat
+ * list right beside it. The quote and backslash strips are what keep a value
+ * that is neither form from producing malformed JSON, which `json_each` raises
+ * on rather than skipping.
+ */
+const CHILD_IDS_AS_JSON = `
+  CASE
+    WHEN json_valid(p.child_session_ids) AND json_type(p.child_session_ids) = 'array'
+         THEN p.child_session_ids
+    WHEN COALESCE(TRIM(p.child_session_ids), '') <> ''
+         THEN '["' || REPLACE(REPLACE(REPLACE(REPLACE(
+                        TRIM(p.child_session_ids),
+                        '\\', ''), '"', ''), ' ', ''), ',', '","') || '"]'
+    ELSE '[]'
+  END`;
+
+/**
+ * Every session below `rootId`, flat, each with the depth it was reached at.
+ *
+ * Descends by two independent links because the collector writes both and
+ * neither is complete on its own: `parent_id`, set from `session.created`, and
+ * `child_session_ids`, accumulated by the parent as it calls `task`. A session
+ * whose `session.created` arrived while the parent was mid-turn has only the
+ * second. `getSessionDetail` already merges both for the flat subagent list;
+ * this is the same union, applied at every level.
+ *
+ * `UNION` (not `UNION ALL`) plus the depth cap is what makes a cycle terminate:
+ * a repeated (id, depth) pair is dropped, and a cycle can only keep producing
+ * new pairs by going deeper.
+ */
+export function findSessionTreeRows(
+  db: Database,
+  rootId: string,
+  maxDepth: number = SESSION_TREE_MAX_DEPTH
+): SessionTreeRow[] {
+  return db
+    .query<SessionTreeRow, [string, number, number]>(
+      `WITH RECURSIVE tree(id, depth) AS (
+         SELECT id, 0 FROM sessions WHERE id = ?
+
+         UNION
+
+         SELECT s.id, t.depth + 1
+           FROM sessions s
+           JOIN tree t ON s.parent_id = t.id
+          WHERE t.depth < ?
+
+         UNION
+
+         SELECT c.id, t.depth + 1
+           FROM tree t
+           JOIN sessions p ON p.id = t.id
+           JOIN json_each(${CHILD_IDS_AS_JSON}) je
+           JOIN sessions c ON c.id = je.value
+          WHERE t.depth < ?
+       )
+       SELECT s.id, s.title, s.agent, s.model_id, s.status, s.session_type,
+              s.parent_id, s.started_at, s.duration_ms, s.input_tokens,
+              s.output_tokens, s.total_cost, s.tools_total, s.child_session_ids,
+              MIN(t.depth) AS depth
+         FROM tree t
+         JOIN sessions s ON s.id = t.id
+        GROUP BY s.id
+        ORDER BY depth, s.started_at, s.id`
+    )
+    .all(rootId, maxDepth, maxDepth);
+}
+
+/**
+ * The top-most session above `id`, following `parent_id` up. Returns `id`
+ * itself when it has no parent, and null when it is not in the table.
+ *
+ * Takes the deepest row reached rather than the one with a null `parent_id`, so
+ * a chain broken by a missing row still resolves to the highest session that
+ * does exist instead of collapsing to null.
+ */
+export function findRootAncestorId(db: Database, id: string): string | null {
+  const row = db
+    .query<{ id: string }, [string, number]>(
+      `WITH RECURSIVE up(id, parent_id, depth) AS (
+         SELECT id, parent_id, 0 FROM sessions WHERE id = ?
+
+         UNION
+
+         SELECT s.id, s.parent_id, u.depth + 1
+           FROM sessions s
+           JOIN up u ON s.id = u.parent_id
+          WHERE u.depth < ?
+       )
+       SELECT id FROM up ORDER BY depth DESC LIMIT 1`
+    )
+    .get(id, SESSION_TREE_MAX_DEPTH * 4);
+  return row?.id ?? null;
 }
 
 export function findAll(

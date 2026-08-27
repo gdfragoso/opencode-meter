@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { initSchema } from "@/data/db/migrations";
-import { getSessionDetail, listSessions, getSessionTypes } from "@/api/services/sessions";
+import { getSessionDetail, getSessionTree, listSessions, getSessionTypes } from "@/api/services/sessions";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -26,12 +26,14 @@ function insertSession(
     directory?: string | null;
     branch?: string | null;
     messages_total?: number;
+    started_at?: number;
+    title?: string;
   } = {}
 ): void {
   db.run(
     `INSERT INTO sessions (
-      id, agent, model_id, input_tokens, output_tokens, tools_total, duration_ms, total_cost, status, parent_id, child_session_ids, directory, branch, messages_total
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, agent, model_id, input_tokens, output_tokens, tools_total, duration_ms, total_cost, status, parent_id, child_session_ids, directory, branch, messages_total, started_at, title
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       data.agent ?? null,
@@ -47,6 +49,8 @@ function insertSession(
       data.directory ?? null,
       data.branch ?? null,
       data.messages_total ?? 1, // default to 1 so active-filter passes
+      data.started_at ?? null,
+      data.title ?? null,
     ]
   );
 }
@@ -185,5 +189,211 @@ describe("getSessionTypes with project/branch filtering", () => {
     const result = getSessionTypes(db, null, null, "main");
     expect(result.main).toBe(2);
     expect(result.subagent).toBe(2);
+  });
+});
+
+describe("getSessionTree", () => {
+  let db: Database;
+
+  const T0 = 1_700_000_000_000;
+
+  /** A `task` call on `parentId`, which is where a routing label comes from. */
+  function insertTaskCall(target: Database, parentId: string, ts: number, args: Record<string, unknown>): void {
+    target.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, ?, 'tool.before', ?)`, [
+      ts,
+      parentId,
+      JSON.stringify({ tool: "task", args }),
+    ]);
+  }
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("returns an empty tree for a session that does not exist", () => {
+    const tree = getSessionTree(db, "missing");
+
+    expect(tree.root).toBeNull();
+    expect(tree.ancestorId).toBeNull();
+    expect(tree.truncated).toBe(false);
+  });
+
+  it("returns a lone session as a root with no children", () => {
+    insertSession(db, "root", { started_at: T0, title: "Ship it" });
+
+    const tree = getSessionTree(db, "root");
+
+    expect(tree.root!.id).toBe("root");
+    expect(tree.root!.title).toBe("Ship it");
+    expect(tree.root!.depth).toBe(0);
+    expect(tree.root!.children).toEqual([]);
+    expect(tree.ancestorId).toBe("root");
+  });
+
+  it("nests children under the parent that spawned them", () => {
+    insertSession(db, "root", { started_at: T0 });
+    insertSession(db, "child", { started_at: T0 + 1, parent_id: "root" });
+    insertSession(db, "grandchild", { started_at: T0 + 2, parent_id: "child" });
+
+    const root = getSessionTree(db, "root").root!;
+
+    expect(root.children.map(c => c.id)).toEqual(["child"]);
+    expect(root.children[0]!.children.map(c => c.id)).toEqual(["grandchild"]);
+    expect(root.children[0]!.children[0]!.depth).toBe(2);
+  });
+
+  it("orders siblings by when they started", () => {
+    insertSession(db, "root", { started_at: T0 });
+    insertSession(db, "late", { started_at: T0 + 900, parent_id: "root" });
+    insertSession(db, "early", { started_at: T0 + 100, parent_id: "root" });
+
+    expect(getSessionTree(db, "root").root!.children.map(c => c.id)).toEqual(["early", "late"]);
+  });
+
+  // Same union getSessionDetail does, so the tree can never show fewer
+  // subagents than the flat list on the same page.
+  it("picks up a child that only child_session_ids knows about", () => {
+    insertSession(db, "root", { started_at: T0, child_session_ids: JSON.stringify(["orphan"]) });
+    insertSession(db, "orphan", { started_at: T0 + 1 });
+
+    expect(getSessionTree(db, "root").root!.children.map(c => c.id)).toEqual(["orphan"]);
+  });
+
+  it("lists a child reached by both links only once", () => {
+    insertSession(db, "root", { started_at: T0, child_session_ids: JSON.stringify(["child"]) });
+    insertSession(db, "child", { started_at: T0 + 1, parent_id: "root" });
+
+    expect(getSessionTree(db, "root").root!.children).toHaveLength(1);
+  });
+
+  describe("subtree totals", () => {
+    beforeEach(() => {
+      insertSession(db, "root", { started_at: T0, input_tokens: 100, output_tokens: 10, total_cost: 1, tools_total: 2, duration_ms: 1000 });
+      insertSession(db, "a", { started_at: T0 + 1, parent_id: "root", input_tokens: 50, output_tokens: 5, total_cost: 0.5, tools_total: 3, duration_ms: 500 });
+      insertSession(db, "b", { started_at: T0 + 2, parent_id: "a", input_tokens: 20, output_tokens: 2, total_cost: 0.25, tools_total: 1, duration_ms: 250 });
+    });
+
+    it("counts the node and everything below it", () => {
+      const root = getSessionTree(db, "root").root!;
+
+      expect(root.subtree.sessions).toBe(3);
+      expect(root.subtree.tokens).toBe(187);
+      expect(root.subtree.cost).toBeCloseTo(1.75, 5);
+      expect(root.subtree.tools).toBe(6);
+      expect(root.subtree.durationMs).toBe(1750);
+    });
+
+    it("leaves each node's own numbers untouched beside the rolled-up ones", () => {
+      const root = getSessionTree(db, "root").root!;
+
+      expect(root.total_cost).toBeCloseTo(1, 5);
+      expect(root.tools_total).toBe(2);
+    });
+
+    it("rolls up per branch, not only at the root", () => {
+      const branch = getSessionTree(db, "root").root!.children[0]!;
+
+      expect(branch.subtree.sessions).toBe(2);
+      expect(branch.subtree.cost).toBeCloseTo(0.75, 5);
+    });
+  });
+
+  describe("routing labels", () => {
+    it("labels a child with the category of the task call that preceded it", () => {
+      insertSession(db, "root", { started_at: T0 });
+      insertTaskCall(db, "root", T0 + 10, { category: "refactor" });
+      insertSession(db, "child", { started_at: T0 + 20, parent_id: "root" });
+
+      expect(getSessionTree(db, "root").root!.children[0]!.routingLabel).toBe("refactor");
+    });
+
+    it("uses the task call closest before the child, not the newest one", () => {
+      insertSession(db, "root", { started_at: T0 });
+      insertTaskCall(db, "root", T0 + 10, { category: "first" });
+      insertSession(db, "child", { started_at: T0 + 20, parent_id: "root" });
+      insertTaskCall(db, "root", T0 + 30, { category: "second" });
+
+      expect(getSessionTree(db, "root").root!.children[0]!.routingLabel).toBe("first");
+    });
+
+    it("leaves the root unlabelled — nothing delegated to it", () => {
+      insertSession(db, "root", { started_at: T0 });
+      insertTaskCall(db, "root", T0 - 10, { category: "refactor" });
+
+      expect(getSessionTree(db, "root").root!.routingLabel).toBeNull();
+    });
+
+    it("is null when the parent made no task call", () => {
+      insertSession(db, "root", { started_at: T0 });
+      insertSession(db, "child", { started_at: T0 + 20, parent_id: "root" });
+
+      expect(getSessionTree(db, "root").root!.children[0]!.routingLabel).toBeNull();
+    });
+  });
+
+  describe("depth cap", () => {
+    beforeEach(() => {
+      insertSession(db, "d0", { started_at: T0 });
+      insertSession(db, "d1", { started_at: T0 + 1, parent_id: "d0" });
+      insertSession(db, "d2", { started_at: T0 + 2, parent_id: "d1" });
+      insertSession(db, "d3", { started_at: T0 + 3, parent_id: "d2" });
+    });
+
+    it("cuts the tree at maxDepth and says so", () => {
+      const tree = getSessionTree(db, "d0", 2);
+
+      expect(tree.truncated).toBe(true);
+      expect(tree.root!.children[0]!.children[0]!.id).toBe("d2");
+      expect(tree.root!.children[0]!.children[0]!.children).toEqual([]);
+    });
+
+    it("does not claim truncation when the whole tree fits", () => {
+      expect(getSessionTree(db, "d0", 5).truncated).toBe(false);
+    });
+
+    // The cut is below the cap, so a subtree total at the cap must not silently
+    // include a level the caller cannot see.
+    it("counts only the sessions it returns", () => {
+      expect(getSessionTree(db, "d0", 2).root!.subtree.sessions).toBe(3);
+    });
+  });
+
+  describe("opened on a subagent", () => {
+    beforeEach(() => {
+      insertSession(db, "root", { started_at: T0 });
+      insertSession(db, "child", { started_at: T0 + 1, parent_id: "root" });
+      insertSession(db, "grandchild", { started_at: T0 + 2, parent_id: "child" });
+    });
+
+    it("roots the tree at the session that was asked for", () => {
+      const tree = getSessionTree(db, "child");
+
+      expect(tree.root!.id).toBe("child");
+      expect(tree.root!.children.map(c => c.id)).toEqual(["grandchild"]);
+    });
+
+    it("reports the top of the chain so the caller can climb", () => {
+      expect(getSessionTree(db, "child").ancestorId).toBe("root");
+    });
+  });
+
+  // A corrupt parent_id chain is the one input that could hang the request.
+  it("survives a cycle", () => {
+    insertSession(db, "a", { started_at: T0, parent_id: "b" });
+    insertSession(db, "b", { started_at: T0 + 1, parent_id: "a" });
+
+    const tree = getSessionTree(db, "a");
+
+    expect(tree.root!.id).toBe("a");
+    expect(tree.root!.children.map(c => c.id)).toEqual(["b"]);
+    expect(tree.root!.children[0]!.children).toEqual([]);
+    expect(tree.root!.subtree.sessions).toBe(2);
+  });
+
+  it("does not choke on a child_session_ids value that is neither JSON nor a list", () => {
+    insertSession(db, "root", { started_at: T0, child_session_ids: '{"not":"an array"}' });
+
+    expect(() => getSessionTree(db, "root")).not.toThrow();
+    expect(getSessionTree(db, "root").root!.children).toEqual([]);
   });
 });

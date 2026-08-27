@@ -1,7 +1,23 @@
 import type { Database } from "bun:sqlite";
-import type { SessionRow, SubagentRow, SessionFilesResponse } from "@/data/domain/session";
-import { findAll, findById, findByIds, findChildrenByParentId, findSessionTypes } from "@/data/repositories/session";
-import { findBySession, findToolsBySession } from "@/data/repositories/event";
+import type {
+  SessionRow,
+  SubagentRow,
+  SessionFilesResponse,
+  SessionTreeNode,
+  SessionTreeResponse,
+  SessionTreeRow,
+} from "@/data/domain/session";
+import {
+  findAll,
+  findById,
+  findByIds,
+  findChildrenByParentId,
+  findRootAncestorId,
+  findSessionTreeRows,
+  findSessionTypes,
+  SESSION_TREE_MAX_DEPTH,
+} from "@/data/repositories/session";
+import { findBySession, findTaskRoutingLabel, findToolsBySession } from "@/data/repositories/event";
 import { findFilesBySession } from "@/data/repositories/files";
 
 export function listSessions(
@@ -20,6 +36,23 @@ export function listSessions(
   return findAll(db, params.limit, params.offset, params.days, params.search, params.status, params.rootOnly, params.project, params.branch);
 }
 
+/**
+ * The ids in a `child_session_ids` column. Stored as a JSON array; databases
+ * written before that format hold a comma-separated string, so both are read.
+ */
+export function parseChildSessionIds(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((childId: unknown): childId is string => typeof childId === "string" && childId.length > 0);
+    }
+  } catch {
+    // Fall through to the legacy format.
+  }
+  return raw.split(",").map(s => s.trim()).filter(Boolean);
+}
+
 export function getSessionDetail(db: Database, id: string): (SessionRow & { subagents: SubagentRow[] }) | null {
   const session = findById(db, id);
   if (!session) return null;
@@ -27,23 +60,9 @@ export function getSessionDetail(db: Database, id: string): (SessionRow & { suba
   let subagents: SubagentRow[] = [];
 
   // 1) Try child_session_ids (stored as JSON array string like ["ses_abc","ses_def"])
-  if (session.child_session_ids) {
-    let childIds: string[] = [];
-    try {
-      const parsed = JSON.parse(session.child_session_ids);
-      if (Array.isArray(parsed)) {
-        childIds = parsed.filter((childId: unknown): childId is string => typeof childId === "string");
-      }
-    } catch {
-      // Fallback: old comma-separated format
-      childIds = session.child_session_ids
-        .split(",")
-        .map(s => s.trim())
-        .filter(Boolean);
-    }
-    if (childIds.length > 0) {
-      subagents = findByIds(db, childIds);
-    }
+  const childIds = parseChildSessionIds(session.child_session_ids);
+  if (childIds.length > 0) {
+    subagents = findByIds(db, childIds);
   }
 
   // 2) Also query by parent_id and merge with dedup (catches subagents not tracked in child_session_ids)
@@ -56,6 +75,110 @@ export function getSessionDetail(db: Database, id: string): (SessionRow & { suba
   }
 
   return { ...session, subagents };
+}
+
+/**
+ * The delegation tree rooted at `id`: who called whom, and what each branch
+ * cost once its own descendants are counted in.
+ *
+ * The flat list from the repository is turned into a tree here rather than in
+ * SQL because a session can be reached by two links (`parent_id` and the
+ * parent's `child_session_ids`) and a node needs exactly one place in the tree.
+ * `parent_id` wins when it points at a session inside the tree, since that is
+ * what OpenCode itself reported; `child_session_ids` fills in the rest.
+ */
+export function getSessionTree(
+  db: Database,
+  id: string,
+  maxDepth: number = SESSION_TREE_MAX_DEPTH
+): SessionTreeResponse {
+  // One level deeper than we keep, so `truncated` is an observation rather than
+  // a guess: anything past the cap is proof the tree continues.
+  const rows = findSessionTreeRows(db, id, maxDepth + 1);
+  if (rows.length === 0) return { root: null, ancestorId: null, truncated: false };
+
+  const truncated = rows.some(r => r.depth > maxDepth);
+  const kept = rows.filter(r => r.depth <= maxDepth);
+  const byId = new Map<string, SessionTreeRow>(kept.map(r => [r.id, r]));
+
+  const parentOf = new Map<string, string>();
+  const link = (childId: string, parentId: string) => {
+    // The requested session is the root; nothing inside the tree adopts it.
+    if (childId === id || childId === parentId || parentOf.has(childId)) return;
+    if (!byId.has(childId)) return;
+    parentOf.set(childId, parentId);
+  };
+  for (const row of kept) {
+    if (row.parent_id) link(row.id, row.parent_id);
+  }
+  for (const row of kept) {
+    for (const childId of parseChildSessionIds(row.child_session_ids)) link(childId, row.id);
+  }
+
+  const childrenOf = new Map<string, string[]>();
+  for (const [childId, parentId] of parentOf) {
+    const list = childrenOf.get(parentId);
+    if (list) list.push(childId);
+    else childrenOf.set(parentId, [childId]);
+  }
+
+  const visited = new Set<string>();
+
+  const build = (nodeId: string, parentId: string | null): SessionTreeNode | null => {
+    // Giving every node exactly one parent already makes a cycle unreachable
+    // from the root: the nodes in it point at each other and nothing points in.
+    // This keeps that true if the parent assignment above ever loosens, which is
+    // the difference between a wrong tree and a request that never returns.
+    if (visited.has(nodeId)) return null;
+    const row = byId.get(nodeId);
+    if (!row) return null;
+    visited.add(nodeId);
+
+    const children = (childrenOf.get(nodeId) ?? [])
+      .map(childId => build(childId, nodeId))
+      .filter((child): child is SessionTreeNode => child !== null)
+      .sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0));
+
+    const tokens = (row.input_tokens ?? 0) + (row.output_tokens ?? 0);
+    const subtree: SessionTreeNode["subtree"] = {
+      sessions: 1,
+      tokens,
+      cost: row.total_cost ?? 0,
+      tools: row.tools_total ?? 0,
+      durationMs: row.duration_ms ?? 0,
+    };
+    for (const child of children) {
+      subtree.sessions += child.subtree.sessions;
+      subtree.tokens += child.subtree.tokens;
+      subtree.cost += child.subtree.cost;
+      subtree.tools += child.subtree.tools;
+      subtree.durationMs += child.subtree.durationMs;
+    }
+
+    return {
+      id: row.id,
+      title: row.title,
+      agent: row.agent,
+      model_id: row.model_id,
+      status: row.status,
+      session_type: row.session_type,
+      started_at: row.started_at,
+      duration_ms: row.duration_ms,
+      input_tokens: row.input_tokens,
+      output_tokens: row.output_tokens,
+      total_cost: row.total_cost,
+      tools_total: row.tools_total,
+      depth: row.depth,
+      routingLabel:
+        parentId !== null && row.started_at !== null
+          ? findTaskRoutingLabel(db, parentId, row.started_at)
+          : null,
+      subtree,
+      children,
+    };
+  };
+
+  return { root: build(id, null), ancestorId: findRootAncestorId(db, id), truncated };
 }
 
 export function getSessionTypes(db: Database, days: number | null, project: string | null = null, branch: string | null = null) {
