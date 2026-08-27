@@ -45,14 +45,15 @@ describe("GET /api/period-comparison", () => {
     expect(body.deltas.cost.pct).toBeCloseTo(100, 5);
   });
 
-  it("reports no comparison when no range is given", async () => {
+  it("picks its own window when no range is given, and says it did", async () => {
     session("s1", NOW - MS_PER_DAY, 1);
 
     const body = await (await app.request("/api/period-comparison")).json();
 
-    expect(body.days).toBeNull();
-    expect(body.previous).toBeNull();
-    expect(body.deltas).toBeNull();
+    expect(body.defaulted).toBe(true);
+    expect(body.days).toBe(30);
+    expect(body.previous).not.toBeNull();
+    expect(body.deltas).not.toBeNull();
   });
 
   it("applies ?project= to both windows", async () => {

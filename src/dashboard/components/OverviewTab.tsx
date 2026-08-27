@@ -550,7 +550,14 @@ export default function OverviewTab() {
           ))}
         </div>
       ) : (
-        <KPIRow summary={summary} skills={skills} deltas={comparison?.deltas ?? null} />
+        <KPIRow
+          summary={summary}
+          skills={skills}
+          // Suppressed when the comparison defaulted its own window: the values
+          // on these cards are then all-time, and pairing them with a 30-day
+          // delta would put an arrow under a number it does not describe.
+          deltas={comparison && !comparison.defaulted ? comparison.deltas : null}
+        />
       )}
 
       {/* Top Models */}

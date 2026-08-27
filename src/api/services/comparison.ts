@@ -10,6 +10,15 @@ import { findFileChangeTotalsInRange } from "@/data/repositories/files";
 const MS_PER_DAY = 86_400_000;
 
 /**
+ * Window used when no range is selected. "All time" has no period before it, so
+ * the section would otherwise be a box that only tells you to go change a
+ * control somewhere else. A named month against the month before it is useful
+ * on its own, and the response says it was defaulted so the caller can label it
+ * rather than quietly showing a different window from the rest of the page.
+ */
+export const DEFAULT_COMPARISON_DAYS = 30;
+
+/**
  * Change between two values.
  *
  * `pct` is null when the earlier value is zero: going from nothing to something
@@ -48,10 +57,9 @@ function snapshot(
  * Both windows end where the next begins — `[now - 2d, now - d)` and
  * `[now - d, now)` — so a session on the boundary lands in exactly one of them.
  *
- * With no range selected there is nothing to compare against: an "all time"
- * window has no earlier window, and inventing one by halving the history would
- * compare a full period against a partial one. `previous` and `deltas` come back
- * null and the UI says why.
+ * With no range selected it falls back to DEFAULT_COMPARISON_DAYS and flags
+ * `defaulted`. Halving the whole history instead would compare a full period
+ * against a partial one, which is why that is not what happens.
  */
 export function getPeriodComparison(
   db: Database,
@@ -60,21 +68,14 @@ export function getPeriodComparison(
   branch: string | null = null,
   now: number = Date.now()
 ): PeriodComparisonResponse {
-  if (days === null || days <= 0) {
-    return {
-      days: null,
-      current: snapshot(db, 0, now, project, branch),
-      previous: null,
-      deltas: null,
-    };
-  }
-
-  const span = days * MS_PER_DAY;
+  const defaulted = days === null || days <= 0;
+  const span = (defaulted ? DEFAULT_COMPARISON_DAYS : days) * MS_PER_DAY;
   const current = snapshot(db, now - span, now, project, branch);
   const previous = snapshot(db, now - 2 * span, now - span, project, branch);
 
   return {
-    days,
+    days: defaulted ? DEFAULT_COMPARISON_DAYS : days,
+    defaulted,
     current,
     previous,
     deltas: {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { initSchema } from "@/data/db/migrations";
 import { insertSessionFiles } from "@/data/repositories/files";
-import { delta, getPeriodComparison } from "@/api/services/comparison";
+import { DEFAULT_COMPARISON_DAYS, delta, getPeriodComparison } from "@/api/services/comparison";
 
 const NOW = 1_700_000_000_000;
 const MS_PER_DAY = 86_400_000;
@@ -193,23 +193,39 @@ describe("getPeriodComparison", () => {
 
   describe("with no range selected", () => {
     beforeEach(() => {
-      insertSession(db, "s1", NOW - 100 * MS_PER_DAY, { cost: 1 });
-      insertSession(db, "s2", NOW - 1 * MS_PER_DAY, { cost: 2 });
+      insertSession(db, "old", NOW - 100 * MS_PER_DAY, { cost: 100 });
+      insertSession(db, "recent", NOW - 1 * MS_PER_DAY, { cost: 2 });
+      insertSession(db, "lastmonth", NOW - 40 * MS_PER_DAY, { cost: 5 });
     });
 
-    // Halving the history to manufacture a comparison would put a full period
-    // against a partial one; better to say there is nothing to compare.
-    it("reports the whole history and no comparison", () => {
+    // "All time" has no period before it. Rather than a section that only tells
+    // the reader to go change a control elsewhere, it picks a window — and says
+    // that it did, because the rest of the page is then on a different range.
+    it("falls back to a default window and flags it", () => {
       const result = compare(null);
 
-      expect(result.days).toBeNull();
-      expect(result.current.sessions).toBe(2);
-      expect(result.previous).toBeNull();
-      expect(result.deltas).toBeNull();
+      expect(result.defaulted).toBe(true);
+      expect(result.days).toBe(DEFAULT_COMPARISON_DAYS);
+      expect(result.previous).not.toBeNull();
+      expect(result.deltas).not.toBeNull();
+    });
+
+    it("compares the default window against the one before it, not the whole history", () => {
+      const result = compare(null);
+
+      // 30-day windows: `recent` in the current one, `lastmonth` in the
+      // previous, and the 100-day-old session in neither.
+      expect(result.current.cost).toBeCloseTo(2, 5);
+      expect(result.previous!.cost).toBeCloseTo(5, 5);
     });
 
     it("treats a zero-day range the same way", () => {
-      expect(compare(0).previous).toBeNull();
+      expect(compare(0).defaulted).toBe(true);
+    });
+
+    it("does not flag a range the caller actually chose", () => {
+      expect(compare(7).defaulted).toBe(false);
+      expect(compare(7).days).toBe(7);
     });
   });
 

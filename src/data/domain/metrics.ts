@@ -111,12 +111,18 @@ export type PeriodDeltaKey =
 export type PeriodDeltas = Record<PeriodDeltaKey, PeriodDelta>;
 
 export interface PeriodComparisonResponse {
-  /** Length of each window in days; null when the range is "all time". */
-  days: number | null;
+  /** Length of each window in days. Always set — see `defaulted`. */
+  days: number;
+  /**
+   * True when no range was selected and a default window was used. The two
+   * windows are then narrower than whatever the rest of the page is showing, so
+   * anything rendering this has to say so — and anything pairing these deltas
+   * with an all-time figure must not use them at all.
+   */
+  defaulted: boolean;
   current: PeriodSnapshot;
-  /** Null when there is no earlier window of the same length to compare against. */
-  previous: PeriodSnapshot | null;
-  deltas: PeriodDeltas | null;
+  previous: PeriodSnapshot;
+  deltas: PeriodDeltas;
 }
 
 /** One model's cache hit rate across a series of days. */
