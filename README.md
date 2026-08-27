@@ -188,6 +188,7 @@ This means the dashboard can stay running even when OpenCode is closed, and the 
 | GET | `/api/sessions/:id/events` | Raw events for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/tools` | Tool usage breakdown for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/files` | File activity per session (read/created/modified/deleted) | `files.ts` |
+| GET | `/api/cost-efficiency` | Cost per file changed / per edit / per line, split by agent and by tool (`?days=&project=&branch=`) | `cost.ts` |
 | GET | `/api/summary` | Aggregate: total sessions, tokens, cost, top models/agents (`?days=&project=&branch=`) | `summary.ts` |
 | GET | `/api/daily` | Daily rollup rows (`?days=&project=&branch=`) | `daily.ts` |
 | GET | `/api/events` | Events (`?session_id=`) | `events.ts` |

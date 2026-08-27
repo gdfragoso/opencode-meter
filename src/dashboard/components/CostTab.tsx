@@ -3,6 +3,12 @@ import { Doughnut, Line } from "react-chartjs-2";
 import { Section, LoadingPlaceholder, EmptyState } from "@/dashboard/components/ui";
 import { useSummary } from "@/dashboard/hooks/useSummary";
 import { useDaily } from "@/dashboard/hooks/useDaily";
+import { useCostEfficiency } from "@/dashboard/hooks/useCostEfficiency";
+import {
+  CostPerResultKpis,
+  CostPerAgentResultTable,
+  CostPerToolTable,
+} from "@/dashboard/components/CostPerResult";
 import { fmtNum, fmtUSD } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, yellow, bg, text } from "@/dashboard/lib/colors";
 import type { SummaryResponse } from "@/data/domain/metrics";
@@ -282,9 +288,10 @@ function CostTrendChart({ daily }: { daily: DailyRow[] | null }) {
 export default function CostTab() {
   const { data: summary, loading: summaryLoading, error: summaryError } = useSummary();
   const { data: daily, loading: dailyLoading, error: dailyError } = useDaily();
+  const { data: efficiency, error: efficiencyError } = useCostEfficiency();
 
   const totalCost = summary?.totalCost ?? 0;
-  const errors = [summaryError, dailyError].filter(Boolean);
+  const errors = [summaryError, dailyError, efficiencyError].filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -294,6 +301,15 @@ export default function CostTab() {
           {errors.join(" | ")}
         </div>
       )}
+
+      {/* Cost per result — what the spend bought, not what it consumed */}
+      <Section title="Cost per Result">
+        {efficiencyError ? (
+          <span className="text-cyber-danger text-xs">{efficiencyError}</span>
+        ) : (
+          <CostPerResultKpis data={efficiency} />
+        )}
+      </Section>
 
       {/* Cost by Model — Donut Chart */}
       <Section title="Cost by Model">
@@ -319,6 +335,24 @@ export default function CostTab() {
           <span className="text-cyber-danger text-xs">{summaryError}</span>
         ) : (
           <CostPerAgentTable agents={summary?.topAgents ?? null} />
+        )}
+      </Section>
+
+      {/* Cost per file changed, by agent */}
+      <Section title="Cost per Result — by Agent">
+        {efficiencyError ? (
+          <span className="text-cyber-danger text-xs">{efficiencyError}</span>
+        ) : (
+          <CostPerAgentResultTable data={efficiency} />
+        )}
+      </Section>
+
+      {/* Cost per file changed, by tool */}
+      <Section title="Cost per Result — by Tool">
+        {efficiencyError ? (
+          <span className="text-cyber-danger text-xs">{efficiencyError}</span>
+        ) : (
+          <CostPerToolTable data={efficiency} />
         )}
       </Section>
 

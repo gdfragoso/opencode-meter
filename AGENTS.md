@@ -47,6 +47,7 @@ Top-level folders under `src/` answer **who runs this and when**:
 | Cost tracking | `src/collector/hooks.ts` | costSource="opencode" — accumulated from message.updated events |
 | File activity | `src/api/routes/files.ts` | GET /api/sessions/:id/files |
 | Delegation tree | `src/data/repositories/session.ts` | findSessionTreeRows() — recursive walk down parent_id *and* child_session_ids |
+| Cost per result | `src/api/services/cost.ts` | Denominators from session_files (action <> 'read'); ratios are null, never 0, when nothing was produced |
 | File activity classification | `src/collector/file-activity.ts` | Classifies tool calls into read/created/modified/deleted |
 | Session state model | `src/collector/session-state.ts` | createSessionState(), SessionData interface |
 | DB schema | `src/data/db/migrations.ts` | CREATE TABLE IF NOT EXISTS sessions/events/daily |

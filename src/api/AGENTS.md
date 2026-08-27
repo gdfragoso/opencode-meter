@@ -31,7 +31,8 @@ api/
 │   ├── errors.ts      # GET /api/errors
 │   ├── models.ts      # GET /api/models
 │   ├── projects.ts    # GET /api/projects + GET /api/projects/:directory
-│   └── files.ts       # GET /api/sessions/:id/files
+│   ├── files.ts       # GET /api/sessions/:id/files
+│   └── cost.ts        # GET /api/cost-efficiency?days=&project=&branch=
 └── services/          # read-side query composition over @/data/repositories
     ├── metrics.ts     # getSummary — top models, agents, tokens
     ├── sessions.ts    # session list/detail
