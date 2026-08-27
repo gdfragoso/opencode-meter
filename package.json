@@ -1,6 +1,6 @@
 {
   "name": "opencode-meter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "type": "module",
   "main": "plugin.ts",
@@ -18,7 +18,9 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
-  "oc-plugin": ["server"],
+  "oc-plugin": [
+    "server"
+  ],
   "engines": {
     "opencode": ">=1.4.3"
   },
