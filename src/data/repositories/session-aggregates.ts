@@ -157,3 +157,110 @@ export function findCacheHitRate(db: Database): number {
     )
     .get()?.rate ?? 0;
 }
+
+/* ── period comparison ───────────────────────────────────────────────────
+   Totals over an explicit half-open range rather than a "last N days" cutoff,
+   so the same function can serve the current window and the one before it. The
+   range is [from, to): closed at the start, open at the end, so two adjacent
+   windows share a boundary without counting the session that sits on it twice.
+   ─────────────────────────────────────────────────────────────────────── */
+
+export interface PeriodTotals {
+  /** Inclusive start of the window, epoch ms. */
+  from: number;
+  /** Exclusive end of the window, epoch ms. */
+  to: number;
+  sessions: number;
+  /**
+   * Sessions you started, excluding the ones subagents opened. Counted apart
+   * because the Overview's Sessions card shows this number, and a delta built
+   * from the other one would move for reasons the card never displays.
+   */
+  userSessions: number;
+  tokens: number;
+  cost: number;
+  tools: number;
+  errors: number;
+  /** Days in the window on which at least one session started. */
+  activeDays: number;
+}
+
+export function findPeriodTotals(
+  db: Database,
+  from: number,
+  to: number,
+  project: string | null = null,
+  branch: string | null = null
+): PeriodTotals {
+  const row = db
+    .query<Omit<PeriodTotals, "from" | "to">, [number, number, string | null, string | null, string | null, string | null]>(
+      `SELECT
+         COUNT(*) AS sessions,
+         COUNT(CASE WHEN parent_id IS NULL THEN 1 END) AS userSessions,
+         COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens), 0) AS tokens,
+         COALESCE(SUM(total_cost), 0) AS cost,
+         COALESCE(SUM(tools_total), 0) AS tools,
+         COALESCE(SUM(CASE WHEN status = 'error' OR error_type IS NOT NULL THEN 1 ELSE 0 END), 0) AS errors,
+         COUNT(DISTINCT date(started_at / 1000, 'unixepoch')) AS activeDays
+       FROM sessions
+       WHERE started_at >= ? AND started_at < ?
+         AND (? IS NULL OR directory = ?)
+         AND (? IS NULL OR branch = ?)`
+    )
+    .get(from, to, project, project, branch, branch);
+
+  return {
+    from,
+    to,
+    sessions: row?.sessions ?? 0,
+    userSessions: row?.userSessions ?? 0,
+    tokens: row?.tokens ?? 0,
+    cost: row?.cost ?? 0,
+    tools: row?.tools ?? 0,
+    errors: row?.errors ?? 0,
+    activeDays: row?.activeDays ?? 0,
+  };
+}
+
+/* ── cache efficiency over time ──────────────────────────────────────────
+   One row per (day, model). Grouped on `date(started_at)`, which is not
+   sargable — but the WHERE filter is on bare `started_at`, so the index still
+   picks the rows and the date function only runs on what survives.
+   ─────────────────────────────────────────────────────────────────────── */
+
+export interface DailyModelCacheRow {
+  date: string;
+  model_id: string;
+  provider_id: string;
+  cacheRead: number;
+  input: number;
+  tokens: number;
+}
+
+export function findDailyModelCache(
+  db: Database,
+  days: number | null = null,
+  project: string | null = null,
+  branch: string | null = null
+): DailyModelCacheRow[] {
+  const cutoff = days !== null ? Date.now() - days * 86400000 : 0;
+
+  return db
+    .query<DailyModelCacheRow, [number | null, number, string | null, string | null, string | null, string | null]>(
+      `SELECT date(started_at / 1000, 'unixepoch') AS date,
+              COALESCE(model_id, '') AS model_id,
+              COALESCE(provider_id, '') AS provider_id,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
+              COALESCE(SUM(input_tokens), 0) AS input,
+              COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens), 0) AS tokens
+         FROM sessions
+        WHERE model_id IS NOT NULL
+          AND started_at IS NOT NULL
+          AND (? IS NULL OR started_at >= ?)
+          AND (? IS NULL OR directory = ?)
+          AND (? IS NULL OR branch = ?)
+        GROUP BY date, model_id, provider_id
+        ORDER BY date, model_id`
+    )
+    .all(days, cutoff, project, project, branch, branch);
+}

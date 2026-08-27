@@ -4,7 +4,9 @@ import { useSession } from "@/dashboard/hooks/useSession";
 import { useEvents } from "@/dashboard/hooks/useEvents";
 import { useSessionTools } from "@/dashboard/hooks/useSessionTools";
 import { useSessionFiles } from "@/dashboard/hooks/useSessionFiles";
+import { useSessionTree } from "@/dashboard/hooks/useSessionTree";
 import GanttChart from "@/dashboard/components/GanttChart";
+import DelegationTree from "@/dashboard/components/DelegationTree";
 import {
   Section,
   LoadingPlaceholder,
@@ -367,37 +369,12 @@ export default function SessionDetail() {
 
   const { events, loading: eventsLoading } = useEvents(id ?? "");
 
+  // Replaces the flat subagent list this page used to build from
+  // session.subagents: the tree carries the same children plus their own
+  // descendants, why each was called, and per-branch totals.
+  const { data: tree, loading: treeLoading } = useSessionTree(id);
+
   // ── derived data (must be BEFORE early returns — hook count stability) ──
-
-  const subagents = useMemo(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const subs = (session as any)?.subagents;
-    if (!subs) return [];
-    return subs as Array<{
-      id: string;
-      agent: string | null;
-      model_id: string | null;
-      input_tokens: number | null;
-      output_tokens: number | null;
-      tools_total: number | null;
-      duration_ms: number | null;
-      total_cost: number | null;
-      status: string | null;
-    }>;
-  }, [session]);
-
-  const subagentTotals = useMemo(() => {
-    if (subagents.length === 0) return null;
-    return {
-      tokens: subagents.reduce(
-        (sum, s) => sum + (s.input_tokens ?? 0) + (s.output_tokens ?? 0), 0,
-      ),
-      tools: subagents.reduce((sum, s) => sum + (s.tools_total ?? 0), 0),
-      duration: subagents.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0),
-      cost: subagents.reduce((sum, s) => sum + (s.total_cost ?? 0), 0),
-      count: subagents.length,
-    };
-  }, [subagents]);
 
   // Skills from events
   const skills = useMemo(() => {
@@ -620,96 +597,12 @@ export default function SessionDetail() {
         <SessionErrorList events={events ?? []} />
       )}
 
-      {/* Subagents */}
-      <Section
-        title="Subagents"
-        meta={subagents.length > 0 ? `(${subagents.length})` : undefined}
-      >
-        {subagents.length === 0 ? (
-          <EmptyState message="No subagents" />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-cyber-cyan/40 uppercase tracking-[0.12em] border-b border-cyber-cyan/10">
-                  <th className="text-left py-2 pr-4 font-normal">Agent</th>
-                  <th className="text-left py-2 pr-4 font-normal">Model</th>
-                  <th className="text-right py-2 pr-4 font-normal">Tokens</th>
-                  <th className="text-right py-2 pr-4 font-normal">Tools</th>
-                  <th className="text-right py-2 pr-4 font-normal">Duration</th>
-                  <th className="text-right py-2 pr-4 font-normal">Cost</th>
-                  <th className="text-right py-2 font-normal">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subagents.map((s) => (
-                  <tr
-                    key={s.id}
-                    tabIndex={0}
-                    role="button"
-                    className="border-b border-cyber-cyan/5 hover:bg-cyber-cyan/5 transition-colors cursor-pointer"
-                    onClick={() => navigate(`/sessions/${s.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") navigate(`/sessions/${s.id}`);
-                    }}
-                  >
-                    <td className="py-2 pr-4 text-cyber-cyan max-w-[180px] truncate">
-                      &#9492; {s.agent}
-                    </td>
-                    <td className="py-2 pr-4 text-cyber-cyan/50 max-w-[160px] truncate">
-                      {s.model_id ?? "\u2014"}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-cyber-cyan/60">
-                      {fmtNum((s.input_tokens ?? 0) + (s.output_tokens ?? 0))}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-cyber-cyan/60">
-                      {fmtNum(s.tools_total ?? 0)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-cyber-cyan/60">
-                      {fmtDur(s.duration_ms)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-cyber-cyan/60">
-                      {fmtUSD(s.total_cost ?? 0)}
-                    </td>
-                    <td className="py-2 text-right">
-                      <span
-                        className={`text-[10px] tracking-[0.08em] uppercase ${
-                          s.status === "error"
-                            ? "text-cyber-danger"
-                            : "text-cyber-cyan/60"
-                        }`}
-                      >
-                        {s.status ?? "\u2014"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {subagentTotals && (
-                  <tr className="border-t-2 border-cyber-cyan/30 bg-cyber-cyan/[0.02] font-bold text-cyber-cyan">
-                    <td className="py-2 pr-4 text-xs tracking-[0.08em] uppercase">TOTAL</td>
-                    <td className="py-2 pr-4 text-cyber-cyan/50">{"\u2014"}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums">
-                      {fmtNum(subagentTotals.tokens)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums">
-                      {fmtNum(subagentTotals.tools)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums">
-                      {fmtDur(subagentTotals.duration)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums">
-                      {fmtUSD(subagentTotals.cost)}
-                    </td>
-                    <td className="py-2 text-right text-xs">
-                      {subagentTotals.count} subagent{subagentTotals.count !== 1 ? "s" : ""}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
+      {/* Delegation tree — who called whom, and what each branch cost */}
+      <DelegationTree
+        tree={tree}
+        loading={treeLoading}
+        currentId={id}
+      />
 
       {/* Skills */}
       <Section
@@ -761,7 +654,7 @@ export default function SessionDetail() {
         ) : (
           <div className="grid gap-4">
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-cyber-cyan mb-2">Lidos</h4>
+              <h4 className="text-xs uppercase tracking-wider text-cyber-cyan mb-2">Read</h4>
               {(files.read ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo lido" />
               ) : (
@@ -779,7 +672,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-emerald-400 mb-2">Criados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-emerald-400 mb-2">Created</h4>
               {(files.created ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo criado" />
               ) : (
@@ -797,7 +690,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-amber-400 mb-2">Modificados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-amber-400 mb-2">Modified</h4>
               {(files.modified ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo modificado" />
               ) : (
@@ -815,7 +708,7 @@ export default function SessionDetail() {
             </div>
 
             <div>
-              <h4 className="text-xs uppercase tracking-wider text-cyber-danger mb-2">Deletados</h4>
+              <h4 className="text-xs uppercase tracking-wider text-cyber-danger mb-2">Deleted</h4>
               {(files.deleted ?? []).length === 0 ? (
                 <EmptyState message="Nenhum arquivo deletado" />
               ) : (

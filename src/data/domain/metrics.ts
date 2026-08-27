@@ -23,3 +23,121 @@ export interface SummaryResponse {
     cost: number;
   }>;
 }
+
+/** Per-agent slice of the cost-per-result view. */
+export interface AgentCostEfficiency {
+  agent: string;
+  sessions: number;
+  cost: number;
+  /** Distinct files this agent wrote, created or deleted. */
+  files: number;
+  /** Lines added plus lines removed. */
+  lines: number;
+  /** Null when the agent changed nothing — not zero. */
+  costPerFile: number | null;
+  costPerSession: number | null;
+}
+
+/** Per-tool slice of the cost-per-result view. */
+export interface ToolCostEfficiency {
+  tool: string;
+  calls: number;
+  cost: number;
+  files: number;
+  lines: number;
+  costPerCall: number | null;
+  costPerFile: number | null;
+}
+
+/**
+ * What the work cost measured against what it produced, rather than against
+ * tokens. Every ratio is null when its denominator is zero, so a window that
+ * spent money and changed nothing reads as "no result" instead of "free".
+ */
+export interface CostEfficiencyResponse {
+  totalCost: number;
+  totalSessions: number;
+  files: number;
+  edits: number;
+  additions: number;
+  deletions: number;
+  costPerFile: number | null;
+  costPerEdit: number | null;
+  costPerLine: number | null;
+  costPerSession: number | null;
+  byAgent: AgentCostEfficiency[];
+  byTool: ToolCostEfficiency[];
+}
+
+/** One window's totals, as the period comparison reports them. */
+export interface PeriodSnapshot {
+  /** Inclusive start, epoch ms. */
+  from: number;
+  /** Exclusive end, epoch ms. */
+  to: number;
+  sessions: number;
+  /** Sessions you started, excluding those opened by subagents. */
+  userSessions: number;
+  tokens: number;
+  cost: number;
+  tools: number;
+  errors: number;
+  activeDays: number;
+  /** Distinct files written, created or deleted in the window. */
+  files: number;
+  /** Lines added plus lines removed. */
+  lines: number;
+}
+
+export interface PeriodDelta {
+  current: number;
+  previous: number;
+  absolute: number;
+  /** Null when the earlier value was zero — a change from nothing has no percentage. */
+  pct: number | null;
+}
+
+export type PeriodDeltaKey =
+  | "sessions"
+  | "userSessions"
+  | "cost"
+  | "tokens"
+  | "tools"
+  | "errors"
+  | "files"
+  | "lines"
+  | "activeDays";
+
+export type PeriodDeltas = Record<PeriodDeltaKey, PeriodDelta>;
+
+export interface PeriodComparisonResponse {
+  /** Length of each window in days; null when the range is "all time". */
+  days: number | null;
+  current: PeriodSnapshot;
+  /** Null when there is no earlier window of the same length to compare against. */
+  previous: PeriodSnapshot | null;
+  deltas: PeriodDeltas | null;
+}
+
+/** One model's cache hit rate across a series of days. */
+export interface CacheTimelineSeries {
+  model_id: string;
+  provider_id: string;
+  /** Total tokens over the window — what the series is ranked by. */
+  tokens: number;
+  /** Hit rate over the whole window; null when the model read nothing. */
+  overallRate: number | null;
+  /**
+   * One entry per date in `CacheTimelineResponse.dates`, same order. Null means
+   * the model was not used that day — not that its hit rate was zero.
+   */
+  rates: Array<number | null>;
+}
+
+export interface CacheTimelineResponse {
+  /** Days that have data, ascending, as `YYYY-MM-DD`. */
+  dates: string[];
+  series: CacheTimelineSeries[];
+  /** Models left out to keep the chart readable. Never silently dropped. */
+  omittedModels: number;
+}

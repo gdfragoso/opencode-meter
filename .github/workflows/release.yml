@@ -26,6 +26,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          # semantic-release reads the tags to know what the last release was,
+          # and the commits since it to decide the next version. The default
+          # shallow checkout has neither. The first release survived that by
+          # accident — there was no previous tag to miss.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
       - uses: actions/cache@v5
         with:

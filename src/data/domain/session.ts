@@ -50,6 +50,69 @@ export type SubagentRow = Pick<
   | "status"
 >;
 
+/** One session in a delegation tree, flat, as the recursive walk returns it. */
+export type SessionTreeRow = Pick<
+  SessionRow,
+  | "id"
+  | "title"
+  | "agent"
+  | "model_id"
+  | "status"
+  | "session_type"
+  | "parent_id"
+  | "started_at"
+  | "duration_ms"
+  | "input_tokens"
+  | "output_tokens"
+  | "total_cost"
+  | "tools_total"
+  | "child_session_ids"
+> & { depth: number };
+
+/** Totals for a node plus every descendant below it. */
+export interface SessionSubtreeTotals {
+  sessions: number;
+  tokens: number;
+  cost: number;
+  tools: number;
+  durationMs: number;
+}
+
+export interface SessionTreeNode {
+  id: string;
+  title: string | null;
+  agent: string | null;
+  model_id: string | null;
+  status: string | null;
+  session_type: string | null;
+  started_at: number | null;
+  duration_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_cost: number | null;
+  tools_total: number | null;
+  depth: number;
+  /**
+   * Why the parent delegated here: the `category` / `subagent_type` argument of
+   * the `task` call that spawned this session. Null for the root and for
+   * harnesses that do not pass one.
+   */
+  routingLabel: string | null;
+  subtree: SessionSubtreeTotals;
+  children: SessionTreeNode[];
+}
+
+export interface SessionTreeResponse {
+  root: SessionTreeNode | null;
+  /**
+   * Top-most ancestor of the requested session. Differs from `root.id` when the
+   * user opened a subagent, so the UI can offer to climb to the whole tree.
+   */
+  ancestorId: string | null;
+  /** True when the depth cap cut the walk short. */
+  truncated: boolean;
+}
+
 export interface SessionFileInfo {
   path: string;
   count: number;
