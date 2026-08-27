@@ -76,6 +76,8 @@ export interface PeriodSnapshot {
   /** Exclusive end, epoch ms. */
   to: number;
   sessions: number;
+  /** Sessions you started, excluding those opened by subagents. */
+  userSessions: number;
   tokens: number;
   cost: number;
   tools: number;
@@ -97,6 +99,7 @@ export interface PeriodDelta {
 
 export type PeriodDeltaKey =
   | "sessions"
+  | "userSessions"
   | "cost"
   | "tokens"
   | "tools"

@@ -6,10 +6,11 @@ import { useSummary } from "@/dashboard/hooks/useSummary";
 import { useSessionTypes, type SessionTypesResponse } from "@/dashboard/hooks/useSessionTypes";
 import { useSkills } from "@/dashboard/hooks/useSkills";
 import { useToolMetrics } from "@/dashboard/hooks/useToolMetrics";
+import { usePeriodComparison } from "@/dashboard/hooks/usePeriodComparison";
 import { fmtNum, fmtUSD, fmtDur } from "@/dashboard/lib/format";
 import { isBuiltinTool, extractServer } from "@/dashboard/lib/tools";
 import { chartColors, cyan, magenta, yellow, bg } from "@/dashboard/lib/colors";
-import type { SummaryResponse } from "@/data/domain/metrics";
+import type { PeriodDeltas, SummaryResponse } from "@/data/domain/metrics";
 import type { ToolMetricsRow } from "@/data/domain/event";
 import type { SkillsResponse } from "@/dashboard/hooks/useSkills";
 
@@ -58,28 +59,43 @@ function classifyToolMetrics(metrics: ToolMetricsRow[]): {
 function KPIRow({
   summary,
   skills,
+  deltas,
 }: {
   summary: SummaryResponse | null;
   skills: SkillsResponse | null;
+  // Null for an "all time" range, which has no window before it to compare
+  // against. The cards then render exactly as they did before.
+  deltas: PeriodDeltas | null;
 }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      {/* The card counts sessions you started, so the delta has to be
+          userSessions — the all-sessions figure would move with subagent
+          activity the card never shows. */}
       <KPICard
         label="Sessions"
         value={summary ? `${summary.totalUserSessions}` : "\u2014"}
         subtitle={summary ? `${summary.totalSessions} total incl. subagents` : undefined}
+        delta={deltas?.userSessions}
+        deltaFormat={fmtNum}
       />
       <KPICard
         label="Tokens"
         value={summary ? fmtNum(summary.totalTokens) : "\u2014"}
+        delta={deltas?.tokens}
+        deltaFormat={fmtNum}
       />
       <KPICard
         label="Cost"
         value={summary ? fmtUSD(summary.totalCost) : "\u2014"}
+        delta={deltas?.cost}
+        deltaFormat={fmtUSD}
       />
       <KPICard
         label="Tools"
         value={summary ? fmtNum(summary.totalTools) : "\u2014"}
+        delta={deltas?.tools}
+        deltaFormat={fmtNum}
       />
       <KPICard
         label="Agents"
@@ -506,6 +522,7 @@ export default function OverviewTab() {
   const { data: skills, loading: skillsLoading, error: skillsError } = useSkills();
   const { data: toolMetrics, loading: tmLoading, error: tmError } = useToolMetrics();
   const { data: sessionTypes, loading: stLoading, error: stError } = useSessionTypes();
+  const { data: comparison } = usePeriodComparison();
 
   const anyLoading = summaryLoading || skillsLoading;
   const errors = [summaryError, skillsError, tmError].filter(Boolean);
@@ -533,7 +550,7 @@ export default function OverviewTab() {
           ))}
         </div>
       ) : (
-        <KPIRow summary={summary} skills={skills} />
+        <KPIRow summary={summary} skills={skills} deltas={comparison?.deltas ?? null} />
       )}
 
       {/* Top Models */}

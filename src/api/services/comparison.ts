@@ -79,6 +79,7 @@ export function getPeriodComparison(
     previous,
     deltas: {
       sessions: delta(current.sessions, previous.sessions),
+      userSessions: delta(current.userSessions, previous.userSessions),
       cost: delta(current.cost, previous.cost),
       tokens: delta(current.tokens, previous.tokens),
       tools: delta(current.tools, previous.tools),

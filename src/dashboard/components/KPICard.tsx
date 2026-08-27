@@ -1,11 +1,33 @@
+import { deltaArrow, deltaTone, formatDelta, type Direction } from "@/dashboard/lib/delta";
+import type { PeriodDelta } from "@/data/domain/metrics";
+
 interface KPICardProps {
   label: string;
   value: string | number;
   subtitle?: string;
-  delta?: number;
+  /**
+   * Change against the period before this one. The whole delta rather than a
+   * bare percentage, because a change from an empty window has no percentage
+   * and the card still has to say something true.
+   *
+   * Was a `number` that nothing ever passed, rendered with any fall painted
+   * red — which would have called a quieter week a problem.
+   */
+  delta?: PeriodDelta;
+  /** How to render the absolute fallback; should match how `value` is formatted. */
+  deltaFormat?: (n: number) => string;
+  /** Defaults to neutral — see `Direction`. Only errors earn a red arrow. */
+  deltaDirection?: Direction;
 }
 
-export default function KPICard({ label, value, subtitle, delta }: KPICardProps) {
+export default function KPICard({
+  label,
+  value,
+  subtitle,
+  delta,
+  deltaFormat = (n) => String(n),
+  deltaDirection = "neutral",
+}: KPICardProps) {
   return (
     <div className="border border-cyber-cyan/20 bg-cyber-cyan/5 p-4 backdrop-blur-sm">
       <div className="text-cyber-cyan/50 text-xs tracking-[0.15em] uppercase mb-2">
@@ -19,15 +41,11 @@ export default function KPICard({ label, value, subtitle, delta }: KPICardProps)
           {subtitle}
         </div>
       )}
-      {delta != null && (
-        <div
-          className={`text-xs tracking-[0.1em] mt-1.5 ${
-            delta >= 0 ? "text-cyber-cyan" : "text-cyber-danger"
-          }`}
-        >
-          <span className="mr-1">{delta >= 0 ? "\u2191" : "\u2193"}</span>
-          {delta >= 0 ? "+" : ""}
-          {delta.toFixed(1)}%
+      {delta && (
+        <div className={`text-xs tracking-[0.1em] mt-1.5 ${deltaTone(delta, deltaDirection)}`}>
+          <span className="mr-1">{deltaArrow(delta)}</span>
+          {formatDelta(delta, deltaFormat)}
+          <span className="text-cyber-cyan/30 ml-1.5">vs prev</span>
         </div>
       )}
     </div>

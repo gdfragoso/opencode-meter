@@ -171,6 +171,12 @@ export interface PeriodTotals {
   /** Exclusive end of the window, epoch ms. */
   to: number;
   sessions: number;
+  /**
+   * Sessions you started, excluding the ones subagents opened. Counted apart
+   * because the Overview's Sessions card shows this number, and a delta built
+   * from the other one would move for reasons the card never displays.
+   */
+  userSessions: number;
   tokens: number;
   cost: number;
   tools: number;
@@ -190,6 +196,7 @@ export function findPeriodTotals(
     .query<Omit<PeriodTotals, "from" | "to">, [number, number, string | null, string | null, string | null, string | null]>(
       `SELECT
          COUNT(*) AS sessions,
+         COUNT(CASE WHEN parent_id IS NULL THEN 1 END) AS userSessions,
          COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens), 0) AS tokens,
          COALESCE(SUM(total_cost), 0) AS cost,
          COALESCE(SUM(tools_total), 0) AS tools,
@@ -206,6 +213,7 @@ export function findPeriodTotals(
     from,
     to,
     sessions: row?.sessions ?? 0,
+    userSessions: row?.userSessions ?? 0,
     tokens: row?.tokens ?? 0,
     cost: row?.cost ?? 0,
     tools: row?.tools ?? 0,
