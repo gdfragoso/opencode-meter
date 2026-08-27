@@ -537,3 +537,84 @@ describe("findToolsOverview and the day window", () => {
     });
   });
 });
+
+describe("findToolMetrics attributes cost to the session that spent it", () => {
+  let db: Database;
+  const T = 1_700_000_000_000;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  function step(sessionID: string, n: number, start: number, end: number, cost: number, tokens: number) {
+    insertEventRaw(db, start, sessionID, "step.start", { step: n });
+    insertEventRaw(db, end, sessionID, "step.finish", { step: n, cost, tokens: { input: tokens, output: 0 } });
+  }
+
+  function tool(sessionID: string, callID: string, name: string, start: number, end: number) {
+    insertEventRaw(db, start, sessionID, "tool.before", { tool: name, callID });
+    insertEventRaw(db, end, sessionID, "tool.after", { tool: name, callID });
+  }
+
+  /**
+   * A parent blocked inside `task` while a subagent works. The two sessions
+   * overlap in time completely, which is the normal shape of delegation — and
+   * exactly the shape that used to make the numbers wrong.
+   */
+  function delegation() {
+    insertSessionTotals(db, "parent", { total_cost: 10 });
+    step("parent", 1, T, T + 10_000, 10, 1000);
+    tool("parent", "c1", "task", T + 1_000, T + 9_000);
+
+    insertSessionTotals(db, "child", { total_cost: 7 });
+    step("child", 1, T + 2_000, T + 8_000, 7, 700);
+    tool("child", "c2", "edit", T + 3_000, T + 7_000);
+  }
+
+  // The subagent's step used to be distributed onto the parent's `task` call
+  // purely because their timestamps overlapped, on top of the `edit` that
+  // actually incurred it. `task` claimed $15 of a $17 total.
+  it("does not charge the parent's task call for the subagent's spend", () => {
+    delegation();
+
+    const task = findToolMetrics(db).find(r => r.tool === "task")!;
+
+    // 8s of the parent's own 10s step, and nothing from the child.
+    expect(task.total_cost).toBeCloseTo(8, 4);
+    expect(task.total_tokens).toBe(800);
+  });
+
+  it("charges the subagent's tool from the subagent's own step", () => {
+    delegation();
+
+    const edit = findToolMetrics(db).find(r => r.tool === "edit")!;
+
+    // 4s of the child's own 6s step.
+    expect(edit.total_cost).toBeCloseTo(4.6667, 3);
+  });
+
+  // The table is a breakdown of real spend, so it must never claim more than
+  // was spent. Time nobody was inside a tool call is simply unattributed.
+  it("never attributes more than was actually spent", () => {
+    delegation();
+
+    const attributed = findToolMetrics(db).reduce((sum, r) => sum + r.total_cost, 0);
+
+    expect(attributed).toBeLessThanOrEqual(17);
+  });
+
+  it("keeps two unrelated concurrent sessions apart", () => {
+    insertSessionTotals(db, "a", { total_cost: 4 });
+    step("a", 1, T, T + 1_000, 4, 400);
+    tool("a", "a1", "read", T, T + 1_000);
+
+    insertSessionTotals(db, "b", { total_cost: 6 });
+    step("b", 1, T, T + 1_000, 6, 600);
+    tool("b", "b1", "grep", T, T + 1_000);
+
+    const rows = findToolMetrics(db);
+
+    expect(rows.find(r => r.tool === "read")!.total_cost).toBeCloseTo(4, 4);
+    expect(rows.find(r => r.tool === "grep")!.total_cost).toBeCloseTo(6, 4);
+  });
+});

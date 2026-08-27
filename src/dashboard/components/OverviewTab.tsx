@@ -232,7 +232,6 @@ function ToolMetricsRow_({
 }) {
   const cost = row.total_cost ?? 0;
   const pct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
-  const isTask = row.tool === "task";
 
   return (
     <div className="grid grid-cols-5 items-center py-1 border-b border-cyber-cyan/5 text-xs">
@@ -241,8 +240,11 @@ function ToolMetricsRow_({
       <span className="text-right tabular-nums text-cyber-cyan/60">
         {row.avg_duration_ms != null ? fmtDur(row.avg_duration_ms) : "\u2014"}
       </span>
+      {/* `task` used to read "n/a" here, because the sweep was charging it with
+          the whole subagent's spend and the number was nonsense. That is fixed
+          at the source now: it shows the parent's own share, like any tool. */}
       <span className="text-right tabular-nums text-cyber-cyan/50" title="Estimated from step timing">
-        {isTask ? "n/a" : row.total_tokens > 0 ? `~${fmtNum(row.total_tokens)}` : "0"}
+        {row.total_tokens > 0 ? `~${fmtNum(row.total_tokens)}` : "0"}
       </span>
       <span className="text-right tabular-nums text-cyber-cyan/60 flex items-center justify-end gap-1.5">
         <span title="Estimated from step timing">~{fmtUSD(cost)}</span>
