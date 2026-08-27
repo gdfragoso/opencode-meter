@@ -3,7 +3,9 @@ import { Line } from "react-chartjs-2";
 import { Section, LoadingPlaceholder, EmptyState } from "@/dashboard/components/ui";
 import { useDaily } from "@/dashboard/hooks/useDaily";
 import { usePeriodComparison } from "@/dashboard/hooks/usePeriodComparison";
+import { useDailyPrevious } from "@/dashboard/hooks/useDailyPrevious";
 import PeriodComparison from "@/dashboard/components/PeriodComparison";
+import { ghostValues, hasGhost, previousSeries } from "@/dashboard/lib/windows";
 import { fmtNum, fmtUSD } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, danger } from "@/dashboard/lib/colors";
 import type { DailyRow } from "@/data/domain/daily";
@@ -84,15 +86,52 @@ function lineDataset(
   };
 }
 
+/**
+ * The same series one window earlier, drawn behind the real one: dashed, thin,
+ * dimmed, unfilled and without points, so it reads as a reference rather than a
+ * second measurement competing for attention.
+ *
+ * `spanGaps` stays false — a day the earlier window has no data for is a hole,
+ * not a value to interpolate across.
+ */
+function ghostDataset(label: string, color: string, data: Array<number | null>) {
+  return {
+    label: `${label} (prev)`,
+    data,
+    borderColor: `${color}55`,
+    backgroundColor: "transparent",
+    pointBackgroundColor: `${color}55`,
+    pointBorderColor: `${color}55`,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    borderDash: [4, 4],
+    tension: 0.3,
+    fill: false,
+    spanGaps: false,
+    borderWidth: 1,
+  };
+}
+
+/** Every chart takes the current rows plus the aligned window before them. */
+interface ChartProps {
+  data: DailyRow[];
+  previous: Array<DailyRow | null>;
+}
+
 /* ── chart sub-components ────────────────────────────────────────────── */
 
-function SessionsChart({ data }: { data: DailyRow[] }) {
+function SessionsChart({ data, previous }: ChartProps) {
   const chartData = useMemo(
     () => ({
       labels: data.map((r) => formatDate(r.date)),
-      datasets: [lineDataset("Sessions", cyan, data.map((r) => r.sessions))],
+      datasets: [
+        lineDataset("Sessions", cyan, data.map((r) => r.sessions)),
+        ...(hasGhost(previous)
+          ? [ghostDataset("Sessions", cyan, ghostValues(previous, (r) => r.sessions))]
+          : []),
+      ],
     }),
-    [data],
+    [data, previous],
   );
 
   return (
@@ -104,16 +143,22 @@ function SessionsChart({ data }: { data: DailyRow[] }) {
   );
 }
 
-function TokensChart({ data }: { data: DailyRow[] }) {
+function TokensChart({ data, previous }: ChartProps) {
   const chartData = useMemo(
     () => ({
       labels: data.map((r) => formatDate(r.date)),
       datasets: [
         lineDataset("In", cyan, data.map((r) => r.tokens_in)),
         lineDataset("Out", magenta, data.map((r) => r.tokens_out)),
+        ...(hasGhost(previous)
+          ? [
+              ghostDataset("In", cyan, ghostValues(previous, (r) => r.tokens_in)),
+              ghostDataset("Out", magenta, ghostValues(previous, (r) => r.tokens_out)),
+            ]
+          : []),
       ],
     }),
-    [data],
+    [data, previous],
   );
 
   const options = useMemo(() => {
@@ -142,13 +187,18 @@ function TokensChart({ data }: { data: DailyRow[] }) {
   );
 }
 
-function CostChart({ data }: { data: DailyRow[] }) {
+function CostChart({ data, previous }: ChartProps) {
   const chartData = useMemo(
     () => ({
       labels: data.map((r) => formatDate(r.date)),
-      datasets: [lineDataset("Cost", magenta, data.map((r) => r.total_cost))],
+      datasets: [
+        lineDataset("Cost", magenta, data.map((r) => r.total_cost)),
+        ...(hasGhost(previous)
+          ? [ghostDataset("Cost", magenta, ghostValues(previous, (r) => r.total_cost))]
+          : []),
+      ],
     }),
-    [data],
+    [data, previous],
   );
 
   const options = useMemo(() => {
@@ -177,15 +227,18 @@ function CostChart({ data }: { data: DailyRow[] }) {
   );
 }
 
-function ErrorRateChart({ data }: { data: DailyRow[] }) {
+function ErrorRateChart({ data, previous }: ChartProps) {
   const chartData = useMemo(
     () => ({
       labels: data.map((r) => formatDate(r.date)),
       datasets: [
         lineDataset("Error Rate %", danger, data.map((r) => errorRate(r)), 0.1),
+        ...(hasGhost(previous)
+          ? [ghostDataset("Error Rate %", danger, ghostValues(previous, errorRate))]
+          : []),
       ],
     }),
-    [data],
+    [data, previous],
   );
 
   const options = useMemo(() => {
@@ -219,6 +272,14 @@ function ErrorRateChart({ data }: { data: DailyRow[] }) {
 export default function AnalyticsTab() {
   const { data, loading, error } = useDaily();
   const { data: comparison, loading: comparisonLoading } = usePeriodComparison();
+  const { rows: withPrevious, days } = useDailyPrevious();
+
+  // Aligned once here rather than inside each chart: all four compare the same
+  // days, and doing it per chart would rebuild the same map four times.
+  const previous = useMemo(
+    () => previousSeries(data ?? [], withPrevious, days),
+    [data, withPrevious, days],
+  );
 
   if (error) {
     return (
@@ -246,10 +307,10 @@ export default function AnalyticsTab() {
         </div>
       ) : hasData ? (
         <>
-          <SessionsChart data={data} />
-          <TokensChart data={data} />
-          <CostChart data={data} />
-          <ErrorRateChart data={data} />
+          <SessionsChart data={data} previous={previous} />
+          <TokensChart data={data} previous={previous} />
+          <CostChart data={data} previous={previous} />
+          <ErrorRateChart data={data} previous={previous} />
         </>
       ) : (
         <EmptyState />
