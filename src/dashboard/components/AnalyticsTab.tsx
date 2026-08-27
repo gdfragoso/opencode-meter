@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { Section, LoadingPlaceholder, EmptyState } from "@/dashboard/components/ui";
 import { useDaily } from "@/dashboard/hooks/useDaily";
+import { usePeriodComparison } from "@/dashboard/hooks/usePeriodComparison";
+import PeriodComparison from "@/dashboard/components/PeriodComparison";
 import { fmtNum, fmtUSD } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, danger } from "@/dashboard/lib/colors";
 import type { DailyRow } from "@/data/domain/daily";
@@ -216,6 +218,7 @@ function ErrorRateChart({ data }: { data: DailyRow[] }) {
 
 export default function AnalyticsTab() {
   const { data, loading, error } = useDaily();
+  const { data: comparison, loading: comparisonLoading } = usePeriodComparison();
 
   if (error) {
     return (
@@ -229,6 +232,10 @@ export default function AnalyticsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Where the period landed relative to the one before it, before any
+          of the charts show how it got there. */}
+      <PeriodComparison data={comparison} loading={comparisonLoading} />
+
       {loading ? (
         <div className="space-y-6">
           {[0, 1, 2, 3].map((i) => (

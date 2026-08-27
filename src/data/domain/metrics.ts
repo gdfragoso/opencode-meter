@@ -68,3 +68,50 @@ export interface CostEfficiencyResponse {
   byAgent: AgentCostEfficiency[];
   byTool: ToolCostEfficiency[];
 }
+
+/** One window's totals, as the period comparison reports them. */
+export interface PeriodSnapshot {
+  /** Inclusive start, epoch ms. */
+  from: number;
+  /** Exclusive end, epoch ms. */
+  to: number;
+  sessions: number;
+  tokens: number;
+  cost: number;
+  tools: number;
+  errors: number;
+  activeDays: number;
+  /** Distinct files written, created or deleted in the window. */
+  files: number;
+  /** Lines added plus lines removed. */
+  lines: number;
+}
+
+export interface PeriodDelta {
+  current: number;
+  previous: number;
+  absolute: number;
+  /** Null when the earlier value was zero — a change from nothing has no percentage. */
+  pct: number | null;
+}
+
+export type PeriodDeltaKey =
+  | "sessions"
+  | "cost"
+  | "tokens"
+  | "tools"
+  | "errors"
+  | "files"
+  | "lines"
+  | "activeDays";
+
+export type PeriodDeltas = Record<PeriodDeltaKey, PeriodDelta>;
+
+export interface PeriodComparisonResponse {
+  /** Length of each window in days; null when the range is "all time". */
+  days: number | null;
+  current: PeriodSnapshot;
+  /** Null when there is no earlier window of the same length to compare against. */
+  previous: PeriodSnapshot | null;
+  deltas: PeriodDeltas | null;
+}

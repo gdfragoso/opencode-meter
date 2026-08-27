@@ -73,6 +73,17 @@ export interface FileChangeTotals {
   deletions: number;
 }
 
+const NO_CHANGES: FileChangeTotals = { files: 0, edits: 0, additions: 0, deletions: 0 };
+
+const CHANGE_TOTALS_SELECT = `
+  SELECT COUNT(DISTINCT f.path) AS files,
+         COUNT(*) AS edits,
+         COALESCE(SUM(f.additions), 0) AS additions,
+         COALESCE(SUM(f.deletions), 0) AS deletions
+    FROM session_files f
+    JOIN sessions s ON s.id = f.session_id
+   WHERE f.action <> 'read'`;
+
 export function findFileChangeTotals(
   db: Database,
   days: number | null = null,
@@ -81,16 +92,32 @@ export function findFileChangeTotals(
 ): FileChangeTotals {
   return (
     db
-      .query<FileChangeTotals, WindowParams>(
-        `SELECT COUNT(DISTINCT f.path) AS files,
-                COUNT(*) AS edits,
-                COALESCE(SUM(f.additions), 0) AS additions,
-                COALESCE(SUM(f.deletions), 0) AS deletions
-           FROM session_files f
-           JOIN sessions s ON s.id = f.session_id
-          WHERE f.action <> 'read' AND ${SESSION_WINDOW}`
+      .query<FileChangeTotals, WindowParams>(`${CHANGE_TOTALS_SELECT} AND ${SESSION_WINDOW}`)
+      .get(...windowParams(days, project, branch)) ?? NO_CHANGES
+  );
+}
+
+/**
+ * The same totals over an explicit half-open range `[from, to)`, for comparing
+ * one window against the one before it. Closed at the start and open at the end
+ * so two adjacent windows can share a boundary without double-counting it.
+ */
+export function findFileChangeTotalsInRange(
+  db: Database,
+  from: number,
+  to: number,
+  project: string | null = null,
+  branch: string | null = null
+): FileChangeTotals {
+  return (
+    db
+      .query<FileChangeTotals, [number, number, string | null, string | null, string | null, string | null]>(
+        `${CHANGE_TOTALS_SELECT}
+           AND s.started_at >= ? AND s.started_at < ?
+           AND (? IS NULL OR s.directory = ?)
+           AND (? IS NULL OR s.branch = ?)`
       )
-      .get(...windowParams(days, project, branch)) ?? { files: 0, edits: 0, additions: 0, deletions: 0 }
+      .get(from, to, project, project, branch, branch) ?? NO_CHANGES
   );
 }
 

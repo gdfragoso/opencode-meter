@@ -157,3 +157,59 @@ export function findCacheHitRate(db: Database): number {
     )
     .get()?.rate ?? 0;
 }
+
+/* ── period comparison ───────────────────────────────────────────────────
+   Totals over an explicit half-open range rather than a "last N days" cutoff,
+   so the same function can serve the current window and the one before it. The
+   range is [from, to): closed at the start, open at the end, so two adjacent
+   windows share a boundary without counting the session that sits on it twice.
+   ─────────────────────────────────────────────────────────────────────── */
+
+export interface PeriodTotals {
+  /** Inclusive start of the window, epoch ms. */
+  from: number;
+  /** Exclusive end of the window, epoch ms. */
+  to: number;
+  sessions: number;
+  tokens: number;
+  cost: number;
+  tools: number;
+  errors: number;
+  /** Days in the window on which at least one session started. */
+  activeDays: number;
+}
+
+export function findPeriodTotals(
+  db: Database,
+  from: number,
+  to: number,
+  project: string | null = null,
+  branch: string | null = null
+): PeriodTotals {
+  const row = db
+    .query<Omit<PeriodTotals, "from" | "to">, [number, number, string | null, string | null, string | null, string | null]>(
+      `SELECT
+         COUNT(*) AS sessions,
+         COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens), 0) AS tokens,
+         COALESCE(SUM(total_cost), 0) AS cost,
+         COALESCE(SUM(tools_total), 0) AS tools,
+         COALESCE(SUM(CASE WHEN status = 'error' OR error_type IS NOT NULL THEN 1 ELSE 0 END), 0) AS errors,
+         COUNT(DISTINCT date(started_at / 1000, 'unixepoch')) AS activeDays
+       FROM sessions
+       WHERE started_at >= ? AND started_at < ?
+         AND (? IS NULL OR directory = ?)
+         AND (? IS NULL OR branch = ?)`
+    )
+    .get(from, to, project, project, branch, branch);
+
+  return {
+    from,
+    to,
+    sessions: row?.sessions ?? 0,
+    tokens: row?.tokens ?? 0,
+    cost: row?.cost ?? 0,
+    tools: row?.tools ?? 0,
+    errors: row?.errors ?? 0,
+    activeDays: row?.activeDays ?? 0,
+  };
+}
