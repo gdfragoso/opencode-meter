@@ -58,6 +58,7 @@ function deltas(over: Partial<PeriodDeltas> = {}): PeriodDeltas {
 function response(over: Partial<PeriodComparisonResponse> = {}): PeriodComparisonResponse {
   return {
     days: 7,
+    defaulted: false,
     current: snapshot(T - 7 * DAY, T),
     previous: snapshot(T - 14 * DAY, T - 7 * DAY),
     deltas: deltas(),
@@ -89,16 +90,22 @@ describe("PeriodComparison", () => {
     expect(screen.getByText("No data yet")).toBeDefined();
   });
 
-  // "All time" has no earlier window; saying what to do beats an empty box.
-  it("asks for a range when there is nothing to compare against", () => {
+  // With no range chosen the service picks the window itself, so the section
+  // still shows numbers — but the charts below are on a different range, and a
+  // reader who does not notice would compare two unrelated things.
+  it("says so when it chose the window itself", () => {
     render(
-      <PeriodComparison
-        data={response({ days: null, previous: null, deltas: null })}
-        loading={false}
-      />
+      <PeriodComparison data={response({ days: 30, defaulted: true })} loading={false} />
     );
 
-    expect(screen.getByText(/pick a range/i)).toBeDefined();
+    expect(screen.getByText(/range is set to all/i)).toBeDefined();
+    expect(screen.getByText("Cost")).toBeDefined();
+  });
+
+  it("stays quiet when the window came from the range the user picked", () => {
+    render(<PeriodComparison data={response()} loading={false} />);
+
+    expect(screen.queryByText(/range is set to all/i)).toBeNull();
   });
 
   it("shows a card for every metric", () => {

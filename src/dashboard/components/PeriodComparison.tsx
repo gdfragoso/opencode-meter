@@ -74,14 +74,6 @@ export default function PeriodComparison({
     );
   }
 
-  if (!data.previous || !data.deltas) {
-    return (
-      <Section title="This Period vs Last">
-        <EmptyState message="Pick a range to compare it against the period before" />
-      </Section>
-    );
-  }
-
   const { deltas, current, previous } = data;
 
   return (
@@ -89,6 +81,15 @@ export default function PeriodComparison({
       title="This Period vs Last"
       meta={`${formatRange(current.from, current.to)} vs ${formatRange(previous.from, previous.to)}`}
     >
+      {/* The header names both windows, so the dates are never ambiguous — but
+          when they were chosen for the reader rather than by them, the charts
+          below are on a different range and that has to be said out loud. */}
+      {data.defaulted && (
+        <p className="mb-3 text-[10px] tracking-[0.08em] uppercase text-cyber-cyan/30">
+          Range is set to All — comparing the last {data.days} days with the {data.days} before
+        </p>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {METRICS.map((spec) => (
           <DeltaCard key={spec.key} spec={spec} d={deltas[spec.key]} />

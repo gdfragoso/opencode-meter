@@ -24,35 +24,17 @@ export interface SummaryResponse {
   }>;
 }
 
-/** Per-agent slice of the cost-per-result view. */
-export interface AgentCostEfficiency {
-  agent: string;
-  sessions: number;
-  cost: number;
-  /** Distinct files this agent wrote, created or deleted. */
-  files: number;
-  /** Lines added plus lines removed. */
-  lines: number;
-  /** Null when the agent changed nothing — not zero. */
-  costPerFile: number | null;
-  costPerSession: number | null;
-}
-
-/** Per-tool slice of the cost-per-result view. */
-export interface ToolCostEfficiency {
-  tool: string;
-  calls: number;
-  cost: number;
-  files: number;
-  lines: number;
-  costPerCall: number | null;
-  costPerFile: number | null;
-}
-
 /**
  * What the work cost measured against what it produced, rather than against
  * tokens. Every ratio is null when its denominator is zero, so a window that
  * spent money and changed nothing reads as "no result" instead of "free".
+ *
+ * Deliberately whole-window only. Splitting these by agent put the cost on the
+ * session that spent it and the files on whichever session did the editing —
+ * which, under delegation, are different sessions. An orchestrator that pays to
+ * direct the work scored no files, and the subagent it paid for looked cheap.
+ * Here numerator and denominator cover the same set of sessions, so there is no
+ * owner to get wrong.
  */
 export interface CostEfficiencyResponse {
   totalCost: number;
@@ -65,8 +47,6 @@ export interface CostEfficiencyResponse {
   costPerEdit: number | null;
   costPerLine: number | null;
   costPerSession: number | null;
-  byAgent: AgentCostEfficiency[];
-  byTool: ToolCostEfficiency[];
 }
 
 /** One window's totals, as the period comparison reports them. */
@@ -111,12 +91,18 @@ export type PeriodDeltaKey =
 export type PeriodDeltas = Record<PeriodDeltaKey, PeriodDelta>;
 
 export interface PeriodComparisonResponse {
-  /** Length of each window in days; null when the range is "all time". */
-  days: number | null;
+  /** Length of each window in days. Always set — see `defaulted`. */
+  days: number;
+  /**
+   * True when no range was selected and a default window was used. The two
+   * windows are then narrower than whatever the rest of the page is showing, so
+   * anything rendering this has to say so — and anything pairing these deltas
+   * with an all-time figure must not use them at all.
+   */
+  defaulted: boolean;
   current: PeriodSnapshot;
-  /** Null when there is no earlier window of the same length to compare against. */
-  previous: PeriodSnapshot | null;
-  deltas: PeriodDeltas | null;
+  previous: PeriodSnapshot;
+  deltas: PeriodDeltas;
 }
 
 /** One model's cache hit rate across a series of days. */

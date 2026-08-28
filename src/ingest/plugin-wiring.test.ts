@@ -163,3 +163,59 @@ describe("plugin wiring: event-derived counters", () => {
     });
   });
 });
+
+describe("plugin wiring: a step's cost reaches the per-tool breakdown", () => {
+  let db: Database;
+  let clockSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    initSchema(db);
+    db.run(`INSERT INTO sessions (id, started_at, messages_total, status) VALUES ('s', ?, 1, 'completed')`, [NOW]);
+    // A clock that advances on every read. Without it the whole exchange lands
+    // in one millisecond, every span has zero duration, and nothing is
+    // attributable to anything — which is true of the code and useless as a
+    // test of it.
+    let tick = NOW;
+    clockSpy = spyOn(Date, "now").mockImplementation(() => (tick += 10));
+  });
+
+  afterEach(() => {
+    clockSpy.mockRestore();
+    db.close();
+  });
+
+  /** Drives the collector the way OpenCode does, into a real database. */
+  async function record() {
+    const { createHookHandlers } = await import("@/collector/hooks");
+    const { insert } = await import("@/data/repositories/event");
+
+    const handlers = createHookHandlers({
+      onEvent: (sessionID, type, data) => insert(db, sessionID, type, data),
+    });
+    const ev = (e: unknown) => handlers.event({ event: e } as never);
+    const part = (p: Record<string, unknown>) =>
+      ev({ type: "message.part.updated", properties: { part: { sessionID: "s", ...p } } });
+
+    await ev({ type: "session.created", properties: { info: { id: "s", time: { created: Date.now() } } } });
+    await part({ type: "step-start" });
+    await handlers.toolBefore?.({ tool: "read", sessionID: "s", callID: "c1" } as never, { args: {} } as never);
+    await handlers.toolAfter?.({ tool: "read", sessionID: "s", callID: "c1" } as never, { title: "", output: "", metadata: {} } as never);
+    await part({ type: "step-finish", reason: "stop", cost: 0.42, tokens: { input: 1000, output: 100 } });
+  }
+
+  // Nothing reads these today — the per-tool cost estimate they fed was removed
+  // for being closer to backwards than to useful. They are recorded so that a
+  // better attribution, whenever one is written, has history to work from
+  // instead of starting at the day it ships.
+  it("writes cost and tokens onto the stored step.finish event", async () => {
+    await record();
+
+    const row = db.query<{ data: string }, []>(`SELECT data FROM events WHERE type = 'step.finish'`).get();
+    const data = JSON.parse(row!.data) as { cost?: number; tokens?: { input: number; output: number } };
+
+    expect(data.cost).toBeCloseTo(0.42, 5);
+    expect(data.tokens).toEqual({ input: 1000, output: 100 });
+  });
+
+});

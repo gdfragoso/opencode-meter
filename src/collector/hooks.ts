@@ -154,9 +154,8 @@ export function createHookHandlers(opts: HookHandlerOptions, logger: Logger = cr
       s.model = input.model?.modelID ?? s.model;
       s.provider = input.model?.providerID ?? s.provider;
       s.messages++;
-      // Prompt text is deliberately not read here. Nothing consumed it once
-      // behaviour scoring was removed, and a metrics plugin has no business
-      // putting what the user types on disk.
+      // Prompt text is deliberately not read here: a metrics plugin has no
+      // business putting what the user types on disk. Only the count moves.
       if (opts.onSessionActive) {
         opts.onSessionActive({
           sessionID: input.sessionID,
@@ -405,10 +404,21 @@ export function createHookHandlers(opts: HookHandlerOptions, logger: Logger = cr
               finishReason: part.reason,
               durationMs,
             });
+            // cost and tokens are what makes a step attributable to the tool
+            // calls inside it. They were captured into `s.steps` above but left
+            // out of the event, so findToolMetrics — which reads `$.cost` and
+            // `$.tokens` off this row — scored every tool at zero. Only the two
+            // figures that query consumes are persisted; the rest of the
+            // breakdown already lives on the session.
             emit("step.finish", {
               sessionID: part.sessionID,
               step: current?.stepNumber ?? s.steps.length,
               durationMs,
+              cost: part.cost,
+              tokens: {
+                input: part.tokens?.input ?? 0,
+                output: part.tokens?.output ?? 0,
+              },
             });
           } else if (part.type === "text" && s.ttftMs === null && part.time?.start) {
             s.ttftMs = part.time.start - s.started;

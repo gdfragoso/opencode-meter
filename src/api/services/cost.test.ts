@@ -67,8 +67,6 @@ describe("getCostEfficiency", () => {
       expect(result.costPerFile).toBeNull();
       expect(result.costPerEdit).toBeNull();
       expect(result.costPerLine).toBeNull();
-      expect(result.byAgent).toEqual([]);
-      expect(result.byTool).toEqual([]);
     });
   });
 
@@ -124,119 +122,6 @@ describe("getCostEfficiency", () => {
     });
   });
 
-  describe("by agent", () => {
-    beforeEach(() => {
-      insertSession(db, "s1", { cost: 2, agent: "builder" });
-      insertSession(db, "s2", { cost: 4, agent: "builder" });
-      insertSession(db, "s3", { cost: 1, agent: "reviewer" });
-      insertSessionFiles(db, "s1", [file("/a.ts", "modified", { additions: 5 })]);
-      insertSessionFiles(db, "s2", [file("/b.ts", "modified", { additions: 5 })]);
-    });
-
-    it("adds up each agent's spend across its sessions", () => {
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-
-      expect(builder.sessions).toBe(2);
-      expect(builder.cost).toBeCloseTo(6, 5);
-    });
-
-    // The bug this guards: grouping over sessions LEFT JOIN session_files
-    // repeats a session once per file, multiplying its cost.
-    it("does not multiply an agent's cost by how many files it touched", () => {
-      insertSessionFiles(db, "s1", [
-        file("/c.ts", "modified"),
-        file("/d.ts", "modified"),
-        file("/e.ts", "modified"),
-      ]);
-
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-      expect(builder.cost).toBeCloseTo(6, 5);
-      expect(builder.files).toBe(5);
-    });
-
-    it("keeps an agent that spent money and changed nothing", () => {
-      const reviewer = getCostEfficiency(db, null).byAgent.find(a => a.agent === "reviewer")!;
-
-      expect(reviewer.cost).toBeCloseTo(1, 5);
-      expect(reviewer.files).toBe(0);
-      expect(reviewer.costPerFile).toBeNull();
-    });
-
-    it("counts a file touched in two of an agent's sessions once", () => {
-      insertSessionFiles(db, "s2", [file("/a.ts", "modified", { additions: 3 })]);
-
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-      expect(builder.files).toBe(2);
-    });
-
-    it("labels sessions with no agent instead of dropping them", () => {
-      insertSession(db, "s4", { cost: 9 });
-
-      expect(getCostEfficiency(db, null).byAgent.map(a => a.agent)).toContain("unknown");
-    });
-
-    it("puts the most expensive agent first", () => {
-      expect(getCostEfficiency(db, null).byAgent.map(a => a.agent)).toEqual(["builder", "reviewer"]);
-    });
-  });
-
-  describe("by tool", () => {
-    beforeEach(() => {
-      insertSession(db, "s1", { cost: 2 });
-      // One step's cost, and two tool calls inside it, so findToolMetrics has
-      // something to split.
-      db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'step.start', ?)`, [
-        NOW,
-        JSON.stringify({ step: 1 }),
-      ]);
-      db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'step.finish', ?)`, [
-        NOW + 1000,
-        JSON.stringify({ step: 1, cost: 2, tokens: { input: 100, output: 10 } }),
-      ]);
-      for (const [callID, tool, start, end] of [
-        ["c1", "edit", NOW + 100, NOW + 300],
-        ["c2", "grep", NOW + 400, NOW + 600],
-      ] as const) {
-        // call_id is a generated column over data.callID — it is set by
-        // writing the JSON, never inserted directly.
-        db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'tool.before', ?)`, [
-          start,
-          JSON.stringify({ tool, callID }),
-        ]);
-        db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'tool.after', ?)`, [
-          end,
-          JSON.stringify({ tool, callID }),
-        ]);
-      }
-      insertSessionFiles(db, "s1", [file("/a.ts", "modified", { tool: "edit", additions: 4, deletions: 1 })]);
-    });
-
-    it("reports the files a tool changed next to what it cost", () => {
-      const edit = getCostEfficiency(db, null).byTool.find(t => t.tool === "edit")!;
-
-      expect(edit.files).toBe(1);
-      expect(edit.lines).toBe(5);
-      expect(edit.costPerFile).toBeCloseTo(edit.cost, 5);
-    });
-
-    // A search costs money and produces no file; dropping it would hide spend.
-    it("keeps a tool that changed no file", () => {
-      const grep = getCostEfficiency(db, null).byTool.find(t => t.tool === "grep")!;
-
-      expect(grep.calls).toBe(1);
-      expect(grep.files).toBe(0);
-      expect(grep.costPerFile).toBeNull();
-      expect(grep.costPerCall).toBeCloseTo(grep.cost, 5);
-    });
-
-    it("puts the most expensive tool first", () => {
-      const tools = getCostEfficiency(db, null).byTool;
-
-      expect(tools.length).toBeGreaterThan(1);
-      expect(tools[0]!.cost).toBeGreaterThanOrEqual(tools[1]!.cost);
-    });
-  });
-
   describe("windowing", () => {
     beforeEach(() => {
       insertSession(db, "old", { startedAt: NOW - 30 * MS_PER_DAY, cost: 100 });
@@ -283,10 +168,6 @@ describe("getCostEfficiency", () => {
 
       expect(result.totalCost).toBeCloseTo(8, 5);
       expect(result.files).toBe(2);
-    });
-
-    it("filters the per-agent rows too", () => {
-      expect(getCostEfficiency(db, null, "/proj/a", null).byAgent).toHaveLength(1);
     });
   });
 });

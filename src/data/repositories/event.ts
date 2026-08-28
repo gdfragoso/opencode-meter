@@ -122,112 +122,42 @@ export function findSkillsAggregated(
     .sort((a, b) => b.count - a.count);
 }
 
-interface StepWindow {
-  session_id: string;
-  step_start: number;
-  step_end: number;
-  tokens: number;
-  cost: number;
-}
-
 interface ToolCall {
-  session_id: string;
   tool: string;
-  tool_start: number;
-  tool_end: number;
   duration_ms: number;
 }
 
 interface ToolAggregate {
   calls: number;
   total_dur: number;
-  tokens: number;
-  cost: number;
 }
 
 /**
- * Splits each step's tokens and cost across the tool calls that ran inside it,
- * in proportion to how much of the step each call overlapped.
+ * Counts calls and durations per tool name.
  *
- * Grouped by session first, and that grouping is load-bearing rather than
- * tidiness. Steps and tool calls used to be matched on timestamps alone, so a
- * step belonging to a subagent was distributed onto whatever the *parent* was
- * running at that moment — and since the parent is blocked inside its `task`
- * call for exactly as long as the subagent runs, the overlap was always total.
- * The subagent's spend landed on `task` on top of the tools that actually
- * incurred it, and the column summed to more than was ever spent.
+ * There used to be a sweep here that split each step's cost across the tool
+ * calls overlapping it, and the result was shown as `~Tokens` / `~Cost`. It was
+ * removed because the model does not survive being stated out loud: a step's
+ * cost is the model's tokens for that turn, and dividing it by how long each
+ * tool happened to run rewards a `bash` that sleeps and ignores a `read` that
+ * returns fifty thousand tokens in twenty milliseconds — close to backwards
+ * from what actually drives the bill.
  *
- * Known limit, unchanged here: two tool calls running concurrently *within one
- * session* both take a share of the same step, so the step's cost is counted
- * once per overlapping call. Sequential calls — the common case — are exact.
+ * `step.finish` still records cost and tokens, so an attribution worth trusting
+ * has history to work from whenever one is written.
  */
-function distributeStepTokens(tools: ToolCall[], steps: StepWindow[]): Map<string, ToolAggregate> {
+function aggregateToolCalls(tools: ToolCall[]): Map<string, ToolAggregate> {
   const agg = new Map<string, ToolAggregate>();
-
-  const stepsBySession = new Map<string, StepWindow[]>();
-  for (const s of steps) {
-    const list = stepsBySession.get(s.session_id);
-    if (list) list.push(s);
-    else stepsBySession.set(s.session_id, [s]);
-  }
-
-  const toolsBySession = new Map<string, ToolCall[]>();
   for (const t of tools) {
-    const list = toolsBySession.get(t.session_id);
-    if (list) list.push(t);
-    else toolsBySession.set(t.session_id, [t]);
-  }
-
-  for (const [sessionID, sessionTools] of toolsBySession) {
-    sweepSession(sessionTools, stepsBySession.get(sessionID) ?? [], agg);
-  }
-
-  return agg;
-}
-
-// Sliding-window sweep: O(T + S) vs the previous O(T × S) nested loop, which
-// blocked the event loop for seconds on large event sets. Both inputs are
-// sorted by start here; callers pass unordered arrays. Accumulates into `agg`
-// so one map collects every session's contribution, keyed by tool name.
-function sweepSession(tools: ToolCall[], steps: StepWindow[], agg: Map<string, ToolAggregate>): void {
-  const sortedSteps = [...steps].sort((a, b) => a.step_start - b.step_start);
-  const sortedTools = [...tools].sort((a, b) => a.tool_start - b.tool_start);
-
-  let lo = 0;
-  let hi = 0;
-  for (const t of sortedTools) {
     let a = agg.get(t.tool);
     if (!a) {
-      a = { calls: 0, total_dur: 0, tokens: 0, cost: 0 };
+      a = { calls: 0, total_dur: 0 };
       agg.set(t.tool, a);
     }
     a.calls++;
     a.total_dur += t.duration_ms;
-
-    const toolDur = t.tool_end - t.tool_start;
-    if (toolDur <= 0) continue;
-
-    // Exclusive window end: first step that starts at/after the tool ends.
-    while (hi < sortedSteps.length && sortedSteps[hi].step_start < t.tool_end) hi++;
-    // Inclusive window start: first step that ends after the tool starts.
-    while (lo < sortedSteps.length && sortedSteps[lo].step_end <= t.tool_start) lo++;
-    // steps[lo..hi) are exactly the steps overlapping this tool (lo <= hi by monotonicity).
-
-    for (let i = lo; i < hi; i++) {
-      const s = sortedSteps[i];
-      const stepDur = s.step_end - s.step_start;
-      if (stepDur <= 0) continue;
-
-      const overlapStart = Math.max(t.tool_start, s.step_start);
-      const overlapEnd = Math.min(t.tool_end, s.step_end);
-      const overlap = overlapEnd - overlapStart;
-      if (overlap <= 0) continue;
-
-      const ratio = overlap / stepDur;
-      a.tokens += ratio * s.tokens;
-      a.cost += ratio * s.cost;
-    }
   }
+  return agg;
 }
 
 export interface SessionCounters {
@@ -336,40 +266,10 @@ export function deriveSessionDiff(db: Database, sessionID: string): SessionDiffT
   return { additions, deletions, filesTouched: rows.map((r) => r.file) };
 }
 
-export function findToolsBySession(db: Database, sessionID: string): Array<{ name: string; count: number; estimated_tokens: number; estimated_cost: number }> {
-  // 1. Get step windows with tokens/cost. Steps repeat per agent inside a
-  //    session (each agent runs step 1, 2, 3…), so joining on (session_id,
-  //    step) alone cross-products. Pair the k-th start with the k-th finish
-  //    by occurrence order instead.
-  const steps = db
-    .query<StepWindow, [string, string]>(
-      `WITH starts AS (
-         SELECT session_id, json_extract(data, '$.step') AS step, ts,
-                ROW_NUMBER() OVER (PARTITION BY session_id, json_extract(data, '$.step') ORDER BY ts) AS rn
-         FROM events WHERE type = 'step.start' AND session_id = ?
-       ),
-       finishes AS (
-         SELECT session_id, json_extract(data, '$.step') AS step, ts,
-                COALESCE(json_extract(data, '$.tokens.input'), 0) + COALESCE(json_extract(data, '$.tokens.output'), 0) AS tokens,
-                COALESCE(json_extract(data, '$.cost'), 0) AS cost,
-                ROW_NUMBER() OVER (PARTITION BY session_id, json_extract(data, '$.step') ORDER BY ts) AS rn
-         FROM events WHERE type = 'step.finish' AND session_id = ?
-       )
-       SELECT s.session_id, s.ts AS step_start, f.ts AS step_end, f.tokens, f.cost
-       FROM starts s
-       JOIN finishes f
-         ON s.session_id = f.session_id
-        AND s.step = f.step
-        AND s.rn = f.rn
-       ORDER BY s.ts`
-    )
-    .all(sessionID, sessionID);
-
-  // 2. Get tool calls with duration
+export function findToolsBySession(db: Database, sessionID: string): Array<{ name: string; count: number }> {
   const tools = db
     .query<ToolCall, [string]>(
-      `SELECT b.session_id, json_extract(b.data, '$.tool') AS tool,
-              b.ts AS tool_start, a.ts AS tool_end,
+      `SELECT json_extract(b.data, '$.tool') AS tool,
               (a.ts - b.ts) AS duration_ms
        FROM events b
        JOIN events a ON b.session_id = a.session_id AND b.call_id = a.call_id
@@ -379,16 +279,8 @@ export function findToolsBySession(db: Database, sessionID: string): Array<{ nam
     )
     .all(sessionID);
 
-  // 3. Distribute step tokens to tools proportionally (sweep-line)
-  const agg = distributeStepTokens(tools, steps);
-
-  return [...agg.entries()]
-    .map(([name, a]) => ({
-      name,
-      count: a.calls,
-      estimated_tokens: Math.round(a.tokens),
-      estimated_cost: Math.round(a.cost * 10000) / 10000,
-    }))
+  return [...aggregateToolCalls(tools).entries()]
+    .map(([name, a]) => ({ name, count: a.calls }))
     .sort((a, b) => b.count - a.count);
 }
 
@@ -424,51 +316,9 @@ export function findToolMetrics(
   const cutoff = days !== null ? Date.now() - days * 86400000 : null;
   const cutoffVal = cutoff ?? 0;
 
-  // Step windows with tokens/cost. Steps repeat per agent inside a session
-  // (each agent runs step 1, 2, 3…), so joining on (session_id, step) alone
-  // cross-products: one session with 51 subagents produced 51 × 51 = 2.6k
-  // pairs per step group and 223k rows globally. Pair the k-th start with
-  // the k-th finish by occurrence order instead.
-  const steps = db
-    .query<StepWindow, [string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null, number | null, number]>(
-      `WITH starts AS (
-         SELECT session_id, json_extract(data, '$.step') AS step, ts,
-                ROW_NUMBER() OVER (PARTITION BY session_id, json_extract(data, '$.step') ORDER BY ts) AS rn
-         FROM events WHERE type = 'step.start'
-           AND session_id IN (
-             SELECT id FROM sessions
-             WHERE (? IS NULL OR directory = ?)
-               AND (? IS NULL OR branch = ?)
-           )
-       ),
-       finishes AS (
-         SELECT session_id, json_extract(data, '$.step') AS step, ts,
-                COALESCE(json_extract(data, '$.tokens.input'), 0) + COALESCE(json_extract(data, '$.tokens.output'), 0) AS tokens,
-                COALESCE(json_extract(data, '$.cost'), 0) AS cost,
-                ROW_NUMBER() OVER (PARTITION BY session_id, json_extract(data, '$.step') ORDER BY ts) AS rn
-         FROM events WHERE type = 'step.finish'
-           AND session_id IN (
-             SELECT id FROM sessions
-             WHERE (? IS NULL OR directory = ?)
-               AND (? IS NULL OR branch = ?)
-           )
-       )
-       SELECT s.session_id, s.ts AS step_start, f.ts AS step_end, f.tokens, f.cost
-       FROM starts s
-       JOIN finishes f
-         ON s.session_id = f.session_id
-        AND s.step = f.step
-        AND s.rn = f.rn
-       WHERE (? IS NULL OR f.ts >= ?)
-       ORDER BY s.ts`
-    )
-    .all(project, project, branch, branch, project, project, branch, branch, days, cutoffVal);
-
-  // Tool calls with duration
   const tools = db
     .query<ToolCall, [number | null, number, string | null, string | null, string | null, string | null]>(
-      `SELECT b.session_id, json_extract(b.data, '$.tool') AS tool,
-              b.ts AS tool_start, a.ts AS tool_end,
+      `SELECT json_extract(b.data, '$.tool') AS tool,
               (a.ts - b.ts) AS duration_ms
        FROM events b
        JOIN events a ON b.session_id = a.session_id AND b.call_id = a.call_id
@@ -484,18 +334,13 @@ export function findToolMetrics(
     )
     .all(days, cutoffVal, project, project, branch, branch);
 
-  // Distribute step tokens to tools proportionally by overlap (sweep-line)
-  const toolAgg = distributeStepTokens(tools, steps);
-
-  return [...toolAgg.entries()]
+  return [...aggregateToolCalls(tools).entries()]
     .map(([tool, agg]) => ({
       tool,
       calls: agg.calls,
       avg_duration_ms: Math.round(agg.total_dur / agg.calls),
-      total_tokens: Math.round(agg.tokens),
-      total_cost: Math.round(agg.cost * 10000) / 10000,
     }))
-    .sort((a, b) => b.calls - a.calls || b.total_cost - a.total_cost);
+    .sort((a, b) => b.calls - a.calls || a.tool.localeCompare(b.tool));
 }
 
 export function findModelsAggregated(

@@ -15,8 +15,6 @@ const BUILTIN_TOOLS = new Set([
 export interface ToolCount {
   name: string;
   count: number;
-  estimated_tokens?: number;
-  estimated_cost?: number;
 }
 
 export interface McpGroup {
