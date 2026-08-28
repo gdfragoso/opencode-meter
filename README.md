@@ -13,7 +13,7 @@ Session metrics plugin for OpenCode. Tracks tokens, cost, tools, and agents into
 - **Cost tracking** -- accumulated from OpenCode's `message.updated` events via the plugin API. No pricing configuration needed.
 - **Dashboard** -- React SPA with charts, session details, tool timelines, model breakdowns, error tracking, and projects portfolio.
 - **CLI** -- `opencode-meter --json`, `--summary`, `--serve`, `--prune` (no `bun run` needed after install).
-- **Nothing you type is stored** -- the plugin records counts, timings and costs. Prompts and file contents never reach the database.
+- **Your prompts are not stored** -- the plugin records counts, timings and costs. Prompt text and file contents never reach the database; the one exception, a `task` call's arguments, is spelled out under [What Is Not Stored](#what-is-not-stored).
 - **Decoupled server** -- dashboard runs independently of OpenCode. Stays alive when OpenCode closes.
 - **Project portfolio** -- per-directory aggregated metrics with branch breakdown and model distribution.
 - **Error tracking** -- captures session errors, error types, and error messages for debugging.
@@ -203,7 +203,10 @@ This means the dashboard can stay running even when OpenCode is closed, and the 
 | GET | `/api/projects` | Project portfolio (`?days=&project=&branch=`) | `projects.ts` |
 | GET | `/api/projects/:directory` | Project detail with branch breakdown, model distribution | `projects.ts` |
 
-Days-aware routes (`/api/summary`, `/api/daily`, `/api/sessions`, `/api/sessions/types`, `/api/projects`) accept optional `?project=` and `?branch=` query params to filter by project directory and branch. The `limit` parameter on `/api/sessions` is clamped between 1 and 200, default 50.
+Every route above except `/health`, `/api/events` and the per-session ones
+(`/api/sessions/:id...`) accepts optional `?days=`, `?project=` and `?branch=`
+to filter by window, project directory and branch. The `limit` parameter on
+`/api/sessions` is clamped between 1 and 200, default 50.
 
 ## Data Storage
 
@@ -233,7 +236,25 @@ bun run typecheck  # tsc --noEmit
 
 ## Troubleshooting
 
-**Port conflict.** The default port is 9393. If it is already in use, `--serve` fails to bind with `EADDRINUSE`. Check whether a dashboard is already running (`curl -sI http://127.0.0.1:9393/api/health | grep x-opencode-meter`), and either kill that process or run the dashboard on another port with `--serve --port N` (or `$OPENCODE_METER_PORT`, which the Vite dev proxy also reads, so dev and served builds agree).
+**Port conflict.** The default port is 9393. `--serve` checks the port before binding: if another `opencode-meter` dashboard already answers there, it says so and exits rather than throwing `EADDRINUSE`.
+
+```
+[opencode-meter] A dashboard is already serving on port 9393: http://127.0.0.1:9393
+Use --port to run a second one, or stop the other process.
+```
+
+Either use that dashboard, run a second one with `--serve --port N` (or `$OPENCODE_METER_PORT`, which the Vite dev proxy also reads, so dev and served builds agree), or stop the first:
+
+```bash
+lsof -nP -iTCP:9393 -sTCP:LISTEN          # see what holds it
+kill $(lsof -t -iTCP:9393 -sTCP:LISTEN)
+```
+
+Use a plain `kill`, not `kill -9`: the server checkpoints the WAL and closes the
+database on `SIGTERM`, and `SIGKILL` cannot be caught.
+
+If something that is *not* a dashboard holds the port, the check does not
+recognise it and the bind fails with `EADDRINUSE`.
 
 **Additions and deletions look too high on old sessions.** Until this was fixed, the collector summed every `session.diff` event. OpenCode re-sends the session's cumulative snapshot diff on each edit, so a file already counted was counted again on every subsequent edit. Sessions recorded before the fix keep their inflated `additions`/`deletions`; there is no automatic repair. Sessions recorded after it are correct, and the totals are now derived from the stored events, so a session that ends more than once no longer accumulates.
 
