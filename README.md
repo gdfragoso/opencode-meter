@@ -155,10 +155,6 @@ Those are the instructions written for a subagent, truncated to 500 characters
 per field. If that matters to you, it is `sanitizeArgs` in
 `src/collector/hooks.ts`.
 
-Earlier versions did store prompt text, in `sessions.user_messages` and a
-`behavior_metrics` table. Both are dropped on first run after upgrading — the
-column and the table go, and what they contained goes with them.
-
 ## Architecture
 
 ```mermaid
@@ -257,6 +253,13 @@ If something that is *not* a dashboard holds the port, the check does not
 recognise it and the bind fails with `EADDRINUSE`.
 
 **Additions and deletions look too high on old sessions.** Until this was fixed, the collector summed every `session.diff` event. OpenCode re-sends the session's cumulative snapshot diff on each edit, so a file already counted was counted again on every subsequent edit. Sessions recorded before the fix keep their inflated `additions`/`deletions`; there is no automatic repair. Sessions recorded after it are correct, and the totals are now derived from the stored events, so a session that ends more than once no longer accumulates.
+
+**Tool tokens and cost read zero.** The `~Tokens` and `~Cost` columns under Top
+Tools are split out of each step's cost, which the collector reads from
+OpenCode's `step-finish` part. Until v1.1.1 the stored event omitted those two
+figures, so every tool scored zero. Sessions recorded before the fix keep their
+zeros — there is nothing to recompute them from — and sessions recorded after it
+are populated.
 
 **Empty dashboard.** If the dashboard loads but shows no data, make sure OpenCode has run at least one session with the plugin loaded. The collector only writes data when OpenCode emits session events. Check that the plugin appears in OpenCode's plugin list.
 
