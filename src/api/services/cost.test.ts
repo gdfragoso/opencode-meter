@@ -67,7 +67,6 @@ describe("getCostEfficiency", () => {
       expect(result.costPerFile).toBeNull();
       expect(result.costPerEdit).toBeNull();
       expect(result.costPerLine).toBeNull();
-      expect(result.byAgent).toEqual([]);
     });
   });
 
@@ -123,62 +122,6 @@ describe("getCostEfficiency", () => {
     });
   });
 
-  describe("by agent", () => {
-    beforeEach(() => {
-      insertSession(db, "s1", { cost: 2, agent: "builder" });
-      insertSession(db, "s2", { cost: 4, agent: "builder" });
-      insertSession(db, "s3", { cost: 1, agent: "reviewer" });
-      insertSessionFiles(db, "s1", [file("/a.ts", "modified", { additions: 5 })]);
-      insertSessionFiles(db, "s2", [file("/b.ts", "modified", { additions: 5 })]);
-    });
-
-    it("adds up each agent's spend across its sessions", () => {
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-
-      expect(builder.sessions).toBe(2);
-      expect(builder.cost).toBeCloseTo(6, 5);
-    });
-
-    // The bug this guards: grouping over sessions LEFT JOIN session_files
-    // repeats a session once per file, multiplying its cost.
-    it("does not multiply an agent's cost by how many files it touched", () => {
-      insertSessionFiles(db, "s1", [
-        file("/c.ts", "modified"),
-        file("/d.ts", "modified"),
-        file("/e.ts", "modified"),
-      ]);
-
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-      expect(builder.cost).toBeCloseTo(6, 5);
-      expect(builder.files).toBe(5);
-    });
-
-    it("keeps an agent that spent money and changed nothing", () => {
-      const reviewer = getCostEfficiency(db, null).byAgent.find(a => a.agent === "reviewer")!;
-
-      expect(reviewer.cost).toBeCloseTo(1, 5);
-      expect(reviewer.files).toBe(0);
-      expect(reviewer.costPerFile).toBeNull();
-    });
-
-    it("counts a file touched in two of an agent's sessions once", () => {
-      insertSessionFiles(db, "s2", [file("/a.ts", "modified", { additions: 3 })]);
-
-      const builder = getCostEfficiency(db, null).byAgent.find(a => a.agent === "builder")!;
-      expect(builder.files).toBe(2);
-    });
-
-    it("labels sessions with no agent instead of dropping them", () => {
-      insertSession(db, "s4", { cost: 9 });
-
-      expect(getCostEfficiency(db, null).byAgent.map(a => a.agent)).toContain("unknown");
-    });
-
-    it("puts the most expensive agent first", () => {
-      expect(getCostEfficiency(db, null).byAgent.map(a => a.agent)).toEqual(["builder", "reviewer"]);
-    });
-  });
-
   describe("windowing", () => {
     beforeEach(() => {
       insertSession(db, "old", { startedAt: NOW - 30 * MS_PER_DAY, cost: 100 });
@@ -225,10 +168,6 @@ describe("getCostEfficiency", () => {
 
       expect(result.totalCost).toBeCloseTo(8, 5);
       expect(result.files).toBe(2);
-    });
-
-    it("filters the per-agent rows too", () => {
-      expect(getCostEfficiency(db, null, "/proj/a", null).byAgent).toHaveLength(1);
     });
   });
 });

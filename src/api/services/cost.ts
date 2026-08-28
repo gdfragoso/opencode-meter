@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { CostEfficiencyResponse } from "@/data/domain/metrics";
-import { findFileChangeTotals, findFileChangesByAgent } from "@/data/repositories/files";
+import { findFileChangeTotals } from "@/data/repositories/files";
 import { findSummaryAggregates } from "@/data/repositories/session-aggregates";
 
 /**
@@ -34,16 +34,6 @@ export function getCostEfficiency(
   const totals = findFileChangeTotals(db, days, project, branch);
   const lines = totals.additions + totals.deletions;
 
-  const byAgent = findFileChangesByAgent(db, days, project, branch).map((a) => ({
-    agent: a.agent,
-    sessions: a.sessions,
-    cost: a.cost,
-    files: a.files,
-    lines: a.additions + a.deletions,
-    costPerFile: per(a.cost, a.files),
-    costPerSession: per(a.cost, a.sessions),
-  }));
-
   return {
     totalCost,
     totalSessions,
@@ -55,6 +45,5 @@ export function getCostEfficiency(
     costPerEdit: per(totalCost, totals.edits),
     costPerLine: per(totalCost, lines),
     costPerSession: per(totalCost, totalSessions),
-    byAgent,
   };
 }

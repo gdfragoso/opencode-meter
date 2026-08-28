@@ -71,6 +71,6 @@ describe("GET /api/cost-efficiency", () => {
 
     expect(body.totalCost).toBe(0);
     expect(body.costPerFile).toBeNull();
-    expect(body.byAgent).toEqual([]);
+    expect(body.costPerEdit).toBeNull();
   });
 });

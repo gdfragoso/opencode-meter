@@ -24,24 +24,17 @@ export interface SummaryResponse {
   }>;
 }
 
-/** Per-agent slice of the cost-per-result view. */
-export interface AgentCostEfficiency {
-  agent: string;
-  sessions: number;
-  cost: number;
-  /** Distinct files this agent wrote, created or deleted. */
-  files: number;
-  /** Lines added plus lines removed. */
-  lines: number;
-  /** Null when the agent changed nothing — not zero. */
-  costPerFile: number | null;
-  costPerSession: number | null;
-}
-
 /**
  * What the work cost measured against what it produced, rather than against
  * tokens. Every ratio is null when its denominator is zero, so a window that
  * spent money and changed nothing reads as "no result" instead of "free".
+ *
+ * Deliberately whole-window only. Splitting these by agent put the cost on the
+ * session that spent it and the files on whichever session did the editing —
+ * which, under delegation, are different sessions. An orchestrator that pays to
+ * direct the work scored no files, and the subagent it paid for looked cheap.
+ * Here numerator and denominator cover the same set of sessions, so there is no
+ * owner to get wrong.
  */
 export interface CostEfficiencyResponse {
   totalCost: number;
@@ -54,7 +47,6 @@ export interface CostEfficiencyResponse {
   costPerEdit: number | null;
   costPerLine: number | null;
   costPerSession: number | null;
-  byAgent: AgentCostEfficiency[];
 }
 
 /** One window's totals, as the period comparison reports them. */

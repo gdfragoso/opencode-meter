@@ -4,10 +4,7 @@ import { Section, LoadingPlaceholder, EmptyState } from "@/dashboard/components/
 import { useSummary } from "@/dashboard/hooks/useSummary";
 import { useDaily } from "@/dashboard/hooks/useDaily";
 import { useCostEfficiency } from "@/dashboard/hooks/useCostEfficiency";
-import {
-  CostPerResultKpis,
-  CostPerAgentResultTable,
-} from "@/dashboard/components/CostPerResult";
+import { CostPerResultKpis } from "@/dashboard/components/CostPerResult";
 import { fmtNum, fmtUSD } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, yellow, bg, text } from "@/dashboard/lib/colors";
 import type { SummaryResponse } from "@/data/domain/metrics";
@@ -334,15 +331,6 @@ export default function CostTab() {
           <span className="text-cyber-danger text-xs">{summaryError}</span>
         ) : (
           <CostPerAgentTable agents={summary?.topAgents ?? null} />
-        )}
-      </Section>
-
-      {/* Cost per file changed, by agent */}
-      <Section title="Cost per Result — by Agent">
-        {efficiencyError ? (
-          <span className="text-cyber-danger text-xs">{efficiencyError}</span>
-        ) : (
-          <CostPerAgentResultTable data={efficiency} />
         )}
       </Section>
 
