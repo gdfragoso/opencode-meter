@@ -7,7 +7,6 @@ import { useCostEfficiency } from "@/dashboard/hooks/useCostEfficiency";
 import {
   CostPerResultKpis,
   CostPerAgentResultTable,
-  CostPerToolTable,
 } from "@/dashboard/components/CostPerResult";
 import { fmtNum, fmtUSD } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, yellow, bg, text } from "@/dashboard/lib/colors";
@@ -344,15 +343,6 @@ export default function CostTab() {
           <span className="text-cyber-danger text-xs">{efficiencyError}</span>
         ) : (
           <CostPerAgentResultTable data={efficiency} />
-        )}
-      </Section>
-
-      {/* Cost per file changed, by tool */}
-      <Section title="Cost per Result — by Tool">
-        {efficiencyError ? (
-          <span className="text-cyber-danger text-xs">{efficiencyError}</span>
-        ) : (
-          <CostPerToolTable data={efficiency} />
         )}
       </Section>
 

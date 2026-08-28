@@ -204,10 +204,10 @@ describe("plugin wiring: a step's cost reaches the per-tool breakdown", () => {
     await part({ type: "step-finish", reason: "stop", cost: 0.42, tokens: { input: 1000, output: 100 } });
   }
 
-  // The whole ~Tokens / ~Cost column in Top Tools rests on these two keys being
-  // present on the stored event. They were not: the collector captured cost and
-  // tokens onto the session's `steps` and emitted an event without them, so
-  // findToolMetrics scored every tool at zero and always had.
+  // Nothing reads these today — the per-tool cost estimate they fed was removed
+  // for being closer to backwards than to useful. They are recorded so that a
+  // better attribution, whenever one is written, has history to work from
+  // instead of starting at the day it ships.
   it("writes cost and tokens onto the stored step.finish event", async () => {
     await record();
 
@@ -218,13 +218,4 @@ describe("plugin wiring: a step's cost reaches the per-tool breakdown", () => {
     expect(data.tokens).toEqual({ input: 1000, output: 100 });
   });
 
-  it("gives the tool a non-zero cost once the event carries one", async () => {
-    const { findToolMetrics } = await import("@/data/repositories/event");
-    await record();
-
-    const read = findToolMetrics(db, null).find((r) => r.tool === "read")!;
-
-    expect(read.total_cost).toBeGreaterThan(0);
-    expect(read.total_tokens).toBeGreaterThan(0);
-  });
 });

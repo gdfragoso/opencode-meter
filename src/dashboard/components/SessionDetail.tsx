@@ -168,12 +168,10 @@ function McpServerCollapsible({
             const avgDur = t.count > 0 ? totalDuration / t.count : 0;
             const fullName = t.name.replace(group.server + "_", "").replace(group.server + "-", "");
             return (
-              <div key={t.name} className="grid grid-cols-[1fr_50px_70px_55px_60px] gap-2 py-1 border-b border-white/5 items-center pl-3">
+              <div key={t.name} className="grid grid-cols-[1fr_60px_80px] gap-2 py-1 border-b border-white/5 items-center pl-3">
                 <span className="text-cyber-cyan/70 text-xs font-mono truncate">{fullName}</span>
                 <span className="text-cyber-cyan/40 text-[10px] tabular-nums text-right">{t.count}</span>
                 <span className="text-cyber-cyan/40 text-[10px] tabular-nums text-right">{fmtDur(avgDur)}</span>
-                <span className="text-cyber-cyan/30 text-[10px] tabular-nums text-right" title="Estimated from step timing">~{fmtNum(t.estimated_tokens)}</span>
-                <span className="text-cyber-cyan/30 text-[10px] tabular-nums text-right" title="Estimated from step timing">~{fmtUSD(t.estimated_cost)}</span>
               </div>
             );
           })}
@@ -202,23 +200,19 @@ function ToolsUsedContent({
         <h3 className="text-cyber-cyan text-[10px] tracking-[0.08em] uppercase mb-2">Built-in</h3>
         {classified.builtin.length > 0 ? (
           <div className="space-y-1">
-            <div className="grid grid-cols-[1fr_50px_70px_55px_60px] gap-2 py-1 text-cyber-cyan/30 text-[9px] uppercase tracking-[0.08em]">
+            <div className="grid grid-cols-[1fr_60px_80px] gap-2 py-1 text-cyber-cyan/30 text-[9px] uppercase tracking-[0.08em]">
               <span>Tool</span>
               <span className="text-right">Calls</span>
               <span className="text-right">Avg Dur</span>
-              <span className="text-right cursor-help" title="Estimated from step timing">~Tokens</span>
-              <span className="text-right cursor-help" title="Estimated from step timing">~Cost</span>
             </div>
             {classified.builtin.map((t) => {
               const totalDuration = toolDurations.get(t.name) ?? 0;
               const avgDur = t.count > 0 ? totalDuration / t.count : 0;
               return (
-                <div key={t.name} className="grid grid-cols-[1fr_50px_70px_55px_60px] gap-2 py-1.5 border-b border-white/5 items-center">
+                <div key={t.name} className="grid grid-cols-[1fr_60px_80px] gap-2 py-1.5 border-b border-white/5 items-center">
                   <span className="text-cyber-cyan text-xs font-mono truncate">{t.name}</span>
                   <span className="text-cyber-cyan/60 text-[10px] tabular-nums text-right">{t.count}</span>
                   <span className="text-cyber-cyan/60 text-[10px] tabular-nums text-right">{fmtDur(avgDur)}</span>
-                  <span className="text-cyber-cyan/40 text-[10px] tabular-nums text-right" title="Estimated from step timing">~{fmtNum(t.estimated_tokens)}</span>
-                  <span className="text-cyber-cyan/40 text-[10px] tabular-nums text-right" title="Estimated from step timing">~{fmtUSD(t.estimated_cost)}</span>
                 </div>
               );
             })}

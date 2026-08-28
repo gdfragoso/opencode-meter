@@ -20,7 +20,6 @@ interface McpMetricsGroup {
   server: string;
   tools: ToolMetricsRow[];
   totalCalls: number;
-  totalCost: number;
 }
 
 function classifyToolMetrics(metrics: ToolMetricsRow[]): {
@@ -45,7 +44,6 @@ function classifyToolMetrics(metrics: ToolMetricsRow[]): {
       server,
       tools: tools.sort((a, b) => b.calls - a.calls),
       totalCalls: tools.reduce((s, t) => s + t.calls, 0),
-      totalCost: tools.reduce((s, t) => s + (t.total_cost ?? 0), 0),
     }))
     .sort((a, b) => b.totalCalls - a.totalCalls);
 
@@ -227,49 +225,23 @@ function AgentsList({ summary }: { summary: SummaryResponse | null }) {
 
 function ToolTableHeader() {
   return (
-    <div className="grid grid-cols-5 text-cyber-cyan/40 uppercase text-[10px] tracking-[0.12em] border-b border-cyber-cyan/10 pb-1.5 mb-1">
+    <div className="grid grid-cols-3 text-cyber-cyan/40 uppercase text-[10px] tracking-[0.12em] border-b border-cyber-cyan/10 pb-1.5 mb-1">
       <span>Tool</span>
       <span className="text-right">Calls</span>
       <span className="text-right">Avg Dur</span>
-      <span className="text-right cursor-help" title="Estimated from step timing">~Tokens</span>
-      <span className="text-right cursor-help" title="Estimated from step timing">~Cost</span>
     </div>
   );
 }
 
 /* ── Tool row (5 columns) ───────────────────────────────────────────── */
 
-function ToolMetricsRow_({
-  row,
-  maxCost,
-}: {
-  row: ToolMetricsRow;
-  maxCost: number;
-}) {
-  const cost = row.total_cost ?? 0;
-  const pct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
-
+function ToolMetricsRow_({ row }: { row: ToolMetricsRow }) {
   return (
-    <div className="grid grid-cols-5 items-center py-1 border-b border-cyber-cyan/5 text-xs">
+    <div className="grid grid-cols-3 items-center py-1 border-b border-cyber-cyan/5 text-xs">
       <span className="text-cyber-cyan font-mono truncate pr-2">{row.tool}</span>
       <span className="text-right tabular-nums text-cyber-cyan/70">{fmtNum(row.calls)}</span>
       <span className="text-right tabular-nums text-cyber-cyan/60">
         {row.avg_duration_ms != null ? fmtDur(row.avg_duration_ms) : "\u2014"}
-      </span>
-      {/* `task` used to read "n/a" here, because the sweep was charging it with
-          the whole subagent's spend and the number was nonsense. That is fixed
-          at the source now: it shows the parent's own share, like any tool. */}
-      <span className="text-right tabular-nums text-cyber-cyan/50" title="Estimated from step timing">
-        {row.total_tokens > 0 ? `~${fmtNum(row.total_tokens)}` : "0"}
-      </span>
-      <span className="text-right tabular-nums text-cyber-cyan/60 flex items-center justify-end gap-1.5">
-        <span title="Estimated from step timing">~{fmtUSD(cost)}</span>
-        <div className="w-12 h-1.5 bg-white/5 rounded-full overflow-hidden flex-shrink-0">
-          <div
-            className="h-full bg-cyber-magenta/40 rounded-full transition-all"
-            style={{ width: `${Math.min(100, pct)}%` }}
-          />
-        </div>
       </span>
     </div>
   );
@@ -279,11 +251,9 @@ function ToolMetricsRow_({
 
 function McpServerGroup({
   group,
-  maxCost,
   defaultOpen = false,
 }: {
   group: McpMetricsGroup;
-  maxCost: number;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -304,7 +274,7 @@ function McpServerGroup({
           {group.server}
         </span>
         <span className="text-cyber-purple/40 text-[10px] tabular-nums">
-          {group.totalCalls} call{group.totalCalls !== 1 ? "s" : ""} — {fmtUSD(group.totalCost)}
+          {group.totalCalls} call{group.totalCalls !== 1 ? "s" : ""}
         </span>
       </button>
       <div
@@ -314,7 +284,7 @@ function McpServerGroup({
         <div className="px-3 pb-2 pt-1">
           <ToolTableHeader />
           {group.tools.map((t) => (
-            <ToolMetricsRow_ key={t.tool} row={t} maxCost={maxCost} />
+            <ToolMetricsRow_ key={t.tool} row={t} />
           ))}
         </div>
       </div>
@@ -467,11 +437,6 @@ function ToolsSection({
   // number of hooks changed with `loading` — React throws "rendered fewer
   // hooks than expected" the moment a load finishes.
   const classified = useMemo(() => classifyToolMetrics(metrics ?? []), [metrics]);
-  const maxCost = useMemo(
-    () => Math.max(0, ...(metrics ?? []).map((m) => m.total_cost ?? 0)),
-    [metrics],
-  );
-
   if (loading) return <LoadingPlaceholder rows={5} />;
   if (error) return <div className="text-cyber-danger text-xs">{error}</div>;
   if (!metrics || metrics.length === 0) return <EmptyState message="No tool data yet" />;
@@ -485,7 +450,7 @@ function ToolsSection({
           <>
             <ToolTableHeader />
             {classified.builtin.map((t) => (
-              <ToolMetricsRow_ key={t.tool} row={t} maxCost={maxCost} />
+              <ToolMetricsRow_ key={t.tool} row={t} />
             ))}
           </>
         ) : (
@@ -502,7 +467,6 @@ function ToolsSection({
               <McpServerGroup
                 key={group.server}
                 group={group}
-                maxCost={maxCost}
                 defaultOpen={true}
               />
             ))}

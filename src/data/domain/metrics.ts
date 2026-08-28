@@ -38,17 +38,6 @@ export interface AgentCostEfficiency {
   costPerSession: number | null;
 }
 
-/** Per-tool slice of the cost-per-result view. */
-export interface ToolCostEfficiency {
-  tool: string;
-  calls: number;
-  cost: number;
-  files: number;
-  lines: number;
-  costPerCall: number | null;
-  costPerFile: number | null;
-}
-
 /**
  * What the work cost measured against what it produced, rather than against
  * tokens. Every ratio is null when its denominator is zero, so a window that
@@ -66,7 +55,6 @@ export interface CostEfficiencyResponse {
   costPerLine: number | null;
   costPerSession: number | null;
   byAgent: AgentCostEfficiency[];
-  byTool: ToolCostEfficiency[];
 }
 
 /** One window's totals, as the period comparison reports them. */

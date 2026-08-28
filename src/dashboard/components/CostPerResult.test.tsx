@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { cleanup, render, screen } from "@testing-library/react";
-import {
-  CostPerResultKpis,
-  CostPerAgentResultTable,
-  CostPerToolTable,
-} from "./CostPerResult";
+import { CostPerResultKpis, CostPerAgentResultTable } from "./CostPerResult";
 import type { CostEfficiencyResponse } from "@/data/domain/metrics";
 
 afterEach(cleanup);
@@ -22,7 +18,6 @@ function response(over: Partial<CostEfficiencyResponse> = {}): CostEfficiencyRes
     costPerLine: null,
     costPerSession: null,
     byAgent: [],
-    byTool: [],
     ...over,
   };
 }
@@ -124,43 +119,5 @@ describe("CostPerAgentResultTable", () => {
 
     const cells = [...container.querySelectorAll("tbody td")].map(c => c.textContent);
     expect(cells.at(-1)).toBe("—");
-  });
-});
-
-describe("CostPerToolTable", () => {
-  const tool = (over: Partial<CostEfficiencyResponse["byTool"][number]> = {}) => ({
-    tool: "edit",
-    calls: 10,
-    cost: 5,
-    files: 4,
-    lines: 60,
-    costPerCall: 0.5,
-    costPerFile: 1.25,
-    ...over,
-  });
-
-  it("shows a skeleton until the data arrives", () => {
-    const { container } = render(<CostPerToolTable data={null} />);
-
-    expect(container.querySelector(".animate-pulse")).not.toBeNull();
-  });
-
-  it("says so when no tool has a row", () => {
-    render(<CostPerToolTable data={response()} />);
-
-    expect(screen.getByText("No data yet")).toBeDefined();
-  });
-
-  it("keeps a tool that cost money and changed no file", () => {
-    const { container } = render(
-      <CostPerToolTable
-        data={response({ byTool: [tool({ tool: "grep", files: 0, costPerFile: null })] })}
-      />
-    );
-
-    expect(screen.getByText("grep")).toBeDefined();
-    const cells = [...container.querySelectorAll("tbody td")].map(c => c.textContent);
-    expect(cells.at(-1)).toBe("—");
-    expect(cells).toContain("$5.00");
   });
 });

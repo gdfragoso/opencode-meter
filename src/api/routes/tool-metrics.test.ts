@@ -29,7 +29,7 @@ describe("GET /api/tool-metrics", () => {
     db = createTestDb();
   });
 
-  it("returns aggregated tool metrics with total_cost > 0 and avg_duration_ms > 0", async () => {
+  it("returns call counts and average duration per tool", async () => {
     const now = Date.now();
     db.run(
       `INSERT INTO sessions (id, input_tokens, output_tokens, total_cost) VALUES (?, ?, ?, ?)`,
@@ -56,9 +56,11 @@ describe("GET /api/tool-metrics", () => {
     expect(body[0].tool).toBe("test-tool");
     expect(body[0].calls).toBe(1);
     expect(body[0].avg_duration_ms).toBeGreaterThan(0);
-    expect(body[0].total_tokens).toBe(150);
-    expect(body[0].total_cost).toBeGreaterThan(0);
-    expect(body[0].total_cost).toBeCloseTo(0.42, 5);
+    // No cost or token column any more: the estimate that filled it divided a
+    // step by how long each tool ran, which rewarded slow tools over expensive
+    // ones. The step events are still recorded, just not attributed.
+    expect(body[0].total_cost).toBeUndefined();
+    expect(body[0].total_tokens).toBeUndefined();
   });
 
   it("filters by ?days=7 returning only recent tools", async () => {

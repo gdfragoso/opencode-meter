@@ -10,8 +10,6 @@ export interface ToolMetricsRow {
   tool: string;
   calls: number;
   avg_duration_ms: number;
-  total_tokens: number;
-  total_cost: number;
 }
 
 export type ToolMetricsResponse = ToolMetricsRow[];

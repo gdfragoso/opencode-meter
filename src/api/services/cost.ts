@@ -1,11 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { CostEfficiencyResponse } from "@/data/domain/metrics";
-import {
-  findFileChangeTotals,
-  findFileChangesByAgent,
-  findFileChangesByTool,
-} from "@/data/repositories/files";
-import { findToolMetrics } from "@/data/repositories/event";
+import { findFileChangeTotals, findFileChangesByAgent } from "@/data/repositories/files";
 import { findSummaryAggregates } from "@/data/repositories/session-aggregates";
 
 /**
@@ -49,27 +44,6 @@ export function getCostEfficiency(
     costPerSession: per(a.cost, a.sessions),
   }));
 
-  // Cost per tool comes from findToolMetrics, which splits each step's cost
-  // across the tool calls that overlap it; the file counts come from
-  // session_files. Two different attributions, joined on the tool name — a tool
-  // that never touches a file (a search, say) keeps its cost and reports no
-  // files rather than being dropped.
-  const filesByTool = new Map(findFileChangesByTool(db, days, project, branch).map((t) => [t.tool, t]));
-  const byTool = findToolMetrics(db, days, project, branch).map((t) => {
-    const changes = filesByTool.get(t.tool);
-    const files = changes?.files ?? 0;
-    return {
-      tool: t.tool,
-      calls: t.calls,
-      cost: t.total_cost,
-      files,
-      lines: (changes?.additions ?? 0) + (changes?.deletions ?? 0),
-      costPerCall: per(t.total_cost, t.calls),
-      costPerFile: per(t.total_cost, files),
-    };
-  });
-  byTool.sort((a, b) => b.cost - a.cost || a.tool.localeCompare(b.tool));
-
   return {
     totalCost,
     totalSessions,
@@ -82,6 +56,5 @@ export function getCostEfficiency(
     costPerLine: per(totalCost, lines),
     costPerSession: per(totalCost, totalSessions),
     byAgent,
-    byTool,
   };
 }

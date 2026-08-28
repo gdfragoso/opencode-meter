@@ -68,7 +68,6 @@ describe("getCostEfficiency", () => {
       expect(result.costPerEdit).toBeNull();
       expect(result.costPerLine).toBeNull();
       expect(result.byAgent).toEqual([]);
-      expect(result.byTool).toEqual([]);
     });
   });
 
@@ -177,63 +176,6 @@ describe("getCostEfficiency", () => {
 
     it("puts the most expensive agent first", () => {
       expect(getCostEfficiency(db, null).byAgent.map(a => a.agent)).toEqual(["builder", "reviewer"]);
-    });
-  });
-
-  describe("by tool", () => {
-    beforeEach(() => {
-      insertSession(db, "s1", { cost: 2 });
-      // One step's cost, and two tool calls inside it, so findToolMetrics has
-      // something to split.
-      db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'step.start', ?)`, [
-        NOW,
-        JSON.stringify({ step: 1 }),
-      ]);
-      db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'step.finish', ?)`, [
-        NOW + 1000,
-        JSON.stringify({ step: 1, cost: 2, tokens: { input: 100, output: 10 } }),
-      ]);
-      for (const [callID, tool, start, end] of [
-        ["c1", "edit", NOW + 100, NOW + 300],
-        ["c2", "grep", NOW + 400, NOW + 600],
-      ] as const) {
-        // call_id is a generated column over data.callID — it is set by
-        // writing the JSON, never inserted directly.
-        db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'tool.before', ?)`, [
-          start,
-          JSON.stringify({ tool, callID }),
-        ]);
-        db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, 's1', 'tool.after', ?)`, [
-          end,
-          JSON.stringify({ tool, callID }),
-        ]);
-      }
-      insertSessionFiles(db, "s1", [file("/a.ts", "modified", { tool: "edit", additions: 4, deletions: 1 })]);
-    });
-
-    it("reports the files a tool changed next to what it cost", () => {
-      const edit = getCostEfficiency(db, null).byTool.find(t => t.tool === "edit")!;
-
-      expect(edit.files).toBe(1);
-      expect(edit.lines).toBe(5);
-      expect(edit.costPerFile).toBeCloseTo(edit.cost, 5);
-    });
-
-    // A search costs money and produces no file; dropping it would hide spend.
-    it("keeps a tool that changed no file", () => {
-      const grep = getCostEfficiency(db, null).byTool.find(t => t.tool === "grep")!;
-
-      expect(grep.calls).toBe(1);
-      expect(grep.files).toBe(0);
-      expect(grep.costPerFile).toBeNull();
-      expect(grep.costPerCall).toBeCloseTo(grep.cost, 5);
-    });
-
-    it("puts the most expensive tool first", () => {
-      const tools = getCostEfficiency(db, null).byTool;
-
-      expect(tools.length).toBeGreaterThan(1);
-      expect(tools[0]!.cost).toBeGreaterThanOrEqual(tools[1]!.cost);
     });
   });
 

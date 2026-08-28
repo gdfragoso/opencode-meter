@@ -49,7 +49,7 @@ Top-level folders under `src/` answer **who runs this and when**:
 | Delegation tree | `src/data/repositories/session.ts` | findSessionTreeRows() — recursive walk down parent_id *and* child_session_ids |
 | Cost per result | `src/api/services/cost.ts` | Denominators from session_files (action <> 'read'); ratios are null, never 0, when nothing was produced |
 | Period comparison | `src/api/services/comparison.ts` | Half-open [from, to) windows so the boundary session is counted once; pct is null when the earlier window was empty; no range selected falls back to DEFAULT_COMPARISON_DAYS with `defaulted: true` |
-| Tool cost attribution | `src/data/repositories/event.ts` | distributeStepTokens() groups by session, then splits each instant of a step among the calls running at it — neither cross-session nor concurrent calls may claim the same cost twice |
+| Per-tool cost | removed | Splitting a step's cost by how long each tool ran rewarded slow tools and ignored expensive ones. `step.finish` still records cost/tokens so a real attribution has history; nothing reads it. |
 | Ghost series alignment | `src/dashboard/lib/windows.ts` | previousSeries() matches by date, not by position — both series skip quiet days, so index alignment invents trends |
 | Delta rendering | `src/dashboard/lib/delta.ts` | One rule shared by the Analytics cards and the Overview KPIs; only `errors` is directional |
 | Cache over time | `src/api/services/cache-timeline.ts` | Series aligned to a shared `dates` array; a null rate is "not used", never 0%; caps at 6 models and reports the count omitted |

@@ -130,7 +130,7 @@ prune with OpenCode closed; the command says which of the two happened.
 |--------|-------------|
 | Tokens | Input, output, reasoning, cache read, cache write per session |
 | Cost | Total cost per session with input/output/cache breakdown |
-| Tools | Tool call counts, durations, and per-tool timing breakdowns |
+| Tools | Tool call counts and durations, per session and aggregated |
 | Agents | Main sessions and subagent sessions with parent/child relationships |
 | File activity | Files read, created, modified, deleted per session |
 | Steps and TTFT | Per-step token/cost breakdown and time-to-first-token |
@@ -184,7 +184,7 @@ This means the dashboard can stay running even when OpenCode is closed, and the 
 | GET | `/api/sessions/:id/events` | Raw events for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/tools` | Tool usage breakdown for a session | `sessions.ts` |
 | GET | `/api/sessions/:id/files` | File activity per session (read/created/modified/deleted) | `files.ts` |
-| GET | `/api/cost-efficiency` | Cost per file changed / per edit / per line, split by agent and by tool (`?days=&project=&branch=`) | `cost.ts` |
+| GET | `/api/cost-efficiency` | Cost per file changed / per edit / per line, split by agent (`?days=&project=&branch=`) | `cost.ts` |
 | GET | `/api/period-comparison` | This window against the one before it, same length (`?days=&project=&branch=`) | `comparison.ts` |
 | GET | `/api/models/cache-timeline` | Cache hit rate per model, day by day (`?days=&project=&branch=`) | `cache-timeline.ts` |
 | GET | `/api/summary` | Aggregate: total sessions, tokens, cost, top models/agents (`?days=&project=&branch=`) | `summary.ts` |
@@ -192,7 +192,7 @@ This means the dashboard can stay running even when OpenCode is closed, and the 
 | GET | `/api/events` | Events (`?session_id=`) | `events.ts` |
 | GET | `/api/skills` | Aggregated skill usage (`?days=&project=&branch=`) | `skills.ts` |
 | GET | `/api/tools/overview` | Aggregated tool call counts (`?days=&project=&branch=`) | `tools.ts` |
-| GET | `/api/tools` | Tool metrics with estimated tokens/cost (`?days=&project=&branch=`) | `tool-metrics.ts` |
+| GET | `/api/tools` | Call counts and average duration per tool (`?days=&project=&branch=`) | `tool-metrics.ts` |
 | GET | `/api/tool-metrics` | Same as `/api/tools` (alias) | `tool-metrics.ts` |
 | GET | `/api/errors` | Error session aggregation (`?days=&project=&branch=`) | `errors.ts` |
 | GET | `/api/models` | Per-model aggregate stats (`?days=&project=&branch=`) | `models.ts` |
@@ -253,13 +253,6 @@ If something that is *not* a dashboard holds the port, the check does not
 recognise it and the bind fails with `EADDRINUSE`.
 
 **Additions and deletions look too high on old sessions.** Until this was fixed, the collector summed every `session.diff` event. OpenCode re-sends the session's cumulative snapshot diff on each edit, so a file already counted was counted again on every subsequent edit. Sessions recorded before the fix keep their inflated `additions`/`deletions`; there is no automatic repair. Sessions recorded after it are correct, and the totals are now derived from the stored events, so a session that ends more than once no longer accumulates.
-
-**Tool tokens and cost read zero.** The `~Tokens` and `~Cost` columns under Top
-Tools are split out of each step's cost, which the collector reads from
-OpenCode's `step-finish` part. Until v1.1.1 the stored event omitted those two
-figures, so every tool scored zero. Sessions recorded before the fix keep their
-zeros — there is nothing to recompute them from — and sessions recorded after it
-are populated.
 
 **Empty dashboard.** If the dashboard loads but shows no data, make sure OpenCode has run at least one session with the plugin loaded. The collector only writes data when OpenCode emits session events. Check that the plugin appears in OpenCode's plugin list.
 
