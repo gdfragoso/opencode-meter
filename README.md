@@ -232,31 +232,14 @@ bun run typecheck  # tsc --noEmit
 
 ## Troubleshooting
 
-**Port conflict.** The default port is 9393. `--serve` checks the port before binding: if another `opencode-meter` dashboard already answers there, it says so and exits rather than throwing `EADDRINUSE`.
+**Port conflict.** The default port is 9393. `--serve` checks the port before binding: if another `opencode-meter` dashboard already answers there, it says so and exits.
 
 ```
 [opencode-meter] A dashboard is already serving on port 9393: http://127.0.0.1:9393
 Use --port to run a second one, or stop the other process.
 ```
 
-Either use that dashboard, run a second one with `--serve --port N` (or `$OPENCODE_METER_PORT`, which the Vite dev proxy also reads, so dev and served builds agree), or stop the first:
-
-```bash
-lsof -nP -iTCP:9393 -sTCP:LISTEN          # see what holds it
-kill $(lsof -t -iTCP:9393 -sTCP:LISTEN)
-```
-
-Use a plain `kill`, not `kill -9`: the server checkpoints the WAL and closes the
-database on `SIGTERM`, and `SIGKILL` cannot be caught.
-
-If something that is *not* a dashboard holds the port, the check does not
-recognise it and the bind fails with `EADDRINUSE`.
-
-**Additions and deletions look too high on old sessions.** Until this was fixed, the collector summed every `session.diff` event. OpenCode re-sends the session's cumulative snapshot diff on each edit, so a file already counted was counted again on every subsequent edit. Sessions recorded before the fix keep their inflated `additions`/`deletions`; there is no automatic repair. Sessions recorded after it are correct, and the totals are now derived from the stored events, so a session that ends more than once no longer accumulates.
-
-**Empty dashboard.** If the dashboard loads but shows no data, make sure OpenCode has run at least one session with the plugin loaded. The collector only writes data when OpenCode emits session events. Check that the plugin appears in OpenCode's plugin list.
-
-**Database corruption.** The database is at `~/.local/share/opencode-meter/metrics.db`. If it becomes corrupted, stop OpenCode and the dashboard, delete the file, and restart. The schema is recreated on next startup. Data loss is limited to the last session that was not persisted.
+Either use that dashboard, or run a second one with `--serve --port N` (or `$OPENCODE_METER_PORT`, which the Vite dev proxy also reads, so dev and served builds agree).
 
 ## Uninstall
 
