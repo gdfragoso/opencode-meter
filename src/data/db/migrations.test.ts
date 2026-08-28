@@ -58,7 +58,7 @@ describe("initSchema error-path logging", () => {
   });
 });
 
-describe("initSchema drops the behaviour tracking", () => {
+describe("initSchema clears out the pre-release behaviour experiment", () => {
   function userTables(db: Database): string[] {
     return db
       .query<{ name: string }, []>(
@@ -76,6 +76,9 @@ describe("initSchema drops the behaviour tracking", () => {
       .map((r) => r.name);
   }
 
+  // Only a database from a pre-release checkout can be in this state — the
+  // experiment was cut before v1.0.0. It is still the one state where the
+  // database holds prompt text, so the drop has to keep working.
   it("removes behavior_metrics and the prompt column from a database that had them", () => {
     const db = new Database(":memory:");
 

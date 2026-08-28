@@ -91,9 +91,12 @@ export function initSchema(db: Database, logger: Logger = createConsoleLogger())
     addColumn(db, "sessions", "branch", "branch TEXT");
     addColumn(db, "sessions", "wall_ms", "wall_ms INTEGER");
 
-    // Behaviour tracking is gone. Nothing read the prompt text once the scores
-    // were removed, so both the column and the table are dropped rather than
-    // left behind holding what the user typed.
+    // Cleanup for databases written before the first release. A behaviour-
+    // scoring experiment kept prompt text in `sessions.user_messages` and a
+    // `behavior_metrics` table; it was cut before v1.0.0, so no published
+    // version ever wrote either. Only local databases from a pre-release
+    // checkout can still hold them — and holding what someone typed is not a
+    // state to leave a database in, so they go on first run.
     dropColumn(db, "sessions", "user_messages", logger);
     db.run(`DROP TABLE IF EXISTS behavior_metrics`);
     db.run(`DROP INDEX IF EXISTS idx_behavior_session_ts`);
