@@ -214,14 +214,20 @@ export function getSessionFiles(db: Database, id: string): SessionFilesResponse 
  */
 export function getSessionContext(db: Database, id: string): SessionContextResponse {
   const turns: SessionContextTurn[] = findContextTurns(db, id).map((r) => {
-    // Neither half recorded: the turn has no context to report. Reporting 0
-    // would draw a drop to the axis where nothing happened — a real turn
-    // always carries some prompt.
-    if (r.input === null && r.cache_read === null) {
-      return { id: r.id, input: null, cacheRead: null, context: null, cacheRate: null };
-    }
     const input = r.input ?? 0;
     const cacheRead = r.cache_read ?? 0;
+    // A prompt of zero tokens does not exist: the model always sees something.
+    // So a turn adding up to nothing was not measured, and reporting it as 0
+    // draws a plunge to the axis where the context never moved.
+    //
+    // Both spellings of "not measured" land here. Some messages omit the token
+    // object entirely; others carry an explicit all-zero one — and those also
+    // drop the `total` field every real turn has:
+    //   {"tokens":{"input":0,"output":0,"cache":{"read":0,"write":0}},"cost":0}
+    // Keying on the sum covers both without guessing which shape arrives.
+    if (input + cacheRead === 0) {
+      return { id: r.id, input: null, cacheRead: null, context: null, cacheRate: null };
+    }
     return {
       id: r.id,
       input,

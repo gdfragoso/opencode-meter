@@ -131,17 +131,27 @@ describe("getSessionContext", () => {
     expect(result.compactedBefore).toEqual([]);
   });
 
-  // A turn with no prompt at all is not a turn with a 0% hit rate.
-  it("reports a null cache rate rather than zero when nothing was read", () => {
-    message(db, "s", "m1", 0, 0);
+  // Real shape, from a 213-turn session: opencode records some assistant
+  // messages with an explicit all-zero token object (and no `total` field,
+  // which every real turn carries). A prompt of zero tokens does not exist, so
+  // this is an unmeasured turn wearing zeros — not a context that collapsed.
+  it("reports a hole for a turn whose tokens are explicitly all zero", () => {
+    message(db, "s", "m1", 2_478, 38_528);
+    message(db, "s", "m2", 0, 0);
+    message(db, "s", "m3", 128, 44_544);
 
-    expect(getSessionContext(db, "s").turns[0]!.cacheRate).toBeNull();
+    const { turns, peakContext } = getSessionContext(db, "s");
+
+    expect(turns[1]!.context).toBeNull();
+    expect(turns[1]!.input).toBeNull();
+    expect(turns[1]!.cacheRate).toBeNull();
+    // The hole keeps its position: turn 2 still exists, it just has no value.
+    expect(turns.length).toBe(3);
+    expect(peakContext).toBe(44_672);
   });
 
-  // A real turn always carries some prompt, so a turn with no token accounting
-  // is missing data. Reporting it as 0 draws a plunge to the axis and reads as
-  // a context reset that never happened — seen on a real 213-turn session.
-  it("reports a hole, not a zero, for a turn with no token accounting", () => {
+  // The other spelling of the same thing: the token object is absent entirely.
+  it("reports a hole for a turn with no token accounting at all", () => {
     message(db, "s", "m1", 1_000, 400_000);
     messageWithoutTokens(db, "s", "m2");
     message(db, "s", "m3", 1_000, 420_000);
