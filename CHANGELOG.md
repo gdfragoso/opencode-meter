@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/gdfragoso/opencode-meter/compare/v2.0.0...v2.1.0) (2026-09-02)
+
+
+### Features
+
+* **dashboard:** chart context size per turn with compaction marks ([#7](https://github.com/gdfragoso/opencode-meter/issues/7)) ([1302975](https://github.com/gdfragoso/opencode-meter/commit/1302975efaa566d55c79f8cc22ee57b5b0369d08))
+
 # [2.0.0](https://github.com/gdfragoso/opencode-meter/compare/v1.1.0...v2.0.0) (2026-08-28)
 
 
