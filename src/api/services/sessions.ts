@@ -213,13 +213,23 @@ export function getSessionFiles(db: Database, id: string): SessionFilesResponse 
  * repeating the formula: one definition of "cached share" for the whole app.
  */
 export function getSessionContext(db: Database, id: string): SessionContextResponse {
-  const turns: SessionContextTurn[] = findContextTurns(db, id).map((r) => ({
-    id: r.id,
-    input: r.input,
-    cacheRead: r.cache_read,
-    context: r.input + r.cache_read,
-    cacheRate: cacheHitRate(r.cache_read, r.input),
-  }));
+  const turns: SessionContextTurn[] = findContextTurns(db, id).map((r) => {
+    // Neither half recorded: the turn has no context to report. Reporting 0
+    // would draw a drop to the axis where nothing happened — a real turn
+    // always carries some prompt.
+    if (r.input === null && r.cache_read === null) {
+      return { id: r.id, input: null, cacheRead: null, context: null, cacheRate: null };
+    }
+    const input = r.input ?? 0;
+    const cacheRead = r.cache_read ?? 0;
+    return {
+      id: r.id,
+      input,
+      cacheRead,
+      context: input + cacheRead,
+      cacheRate: cacheHitRate(cacheRead, input),
+    };
+  });
 
   // A compaction sits before the first turn recorded after it. One that
   // happened after the last turn has nothing to mark, and is dropped rather
@@ -235,6 +245,6 @@ export function getSessionContext(db: Database, id: string): SessionContextRespo
   return {
     turns,
     compactedBefore,
-    peakContext: turns.reduce((max, t) => Math.max(max, t.context), 0),
+    peakContext: turns.reduce((max, t) => Math.max(max, t.context ?? 0), 0),
   };
 }

@@ -20,6 +20,16 @@ function message(
   ]);
 }
 
+/** A turn opencode recorded with no token accounting at all. */
+function messageWithoutTokens(db: Database, sessionID: string, messageID: string): void {
+  db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, ?, ?, ?)`, [
+    NOW,
+    sessionID,
+    "message.updated",
+    JSON.stringify({ sessionID, messageID, role: "assistant" }),
+  ]);
+}
+
 function compaction(db: Database, sessionID: string): void {
   db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, ?, ?, ?)`, [
     NOW,
@@ -126,6 +136,40 @@ describe("getSessionContext", () => {
     message(db, "s", "m1", 0, 0);
 
     expect(getSessionContext(db, "s").turns[0]!.cacheRate).toBeNull();
+  });
+
+  // A real turn always carries some prompt, so a turn with no token accounting
+  // is missing data. Reporting it as 0 draws a plunge to the axis and reads as
+  // a context reset that never happened — seen on a real 213-turn session.
+  it("reports a hole, not a zero, for a turn with no token accounting", () => {
+    message(db, "s", "m1", 1_000, 400_000);
+    messageWithoutTokens(db, "s", "m2");
+    message(db, "s", "m3", 1_000, 420_000);
+
+    const { turns, peakContext } = getSessionContext(db, "s");
+
+    expect(turns[1]!.context).toBeNull();
+    expect(turns[1]!.input).toBeNull();
+    expect(turns[1]!.cacheRate).toBeNull();
+    // The hole must not drag the peak down or count as the smallest turn.
+    expect(peakContext).toBe(421_000);
+  });
+
+  // Half-recorded is different from not recorded: a turn that read nothing from
+  // cache genuinely read zero, and that is a real point on the curve.
+  it("treats a missing half as zero when the other half is present", () => {
+    db.run(`INSERT INTO events (ts, session_id, type, data) VALUES (?, ?, ?, ?)`, [
+      NOW,
+      "s",
+      "message.updated",
+      JSON.stringify({ sessionID: "s", messageID: "m1", tokens: { input: 500 } }),
+    ]);
+
+    const [turn] = getSessionContext(db, "s").turns;
+
+    expect(turn!.context).toBe(500);
+    expect(turn!.cacheRead).toBe(0);
+    expect(turn!.cacheRate).toBe(0);
   });
 
   it("reports an empty series for a session with nothing recorded", () => {

@@ -142,12 +142,15 @@ export interface SessionFilesResponse {
 export interface SessionContextTurn {
   /** Event id. The ordering key, and what compaction marks are placed against. */
   id: number;
-  /** Uncached prompt tokens. */
-  input: number;
+  /**
+   * Uncached prompt tokens. Null when the turn recorded no token accounting —
+   * a hole in the series, not a turn that used nothing.
+   */
+  input: number | null;
   /** Prompt tokens served from cache. Disjoint from `input`. */
-  cacheRead: number;
-  /** `input + cacheRead` — the whole prompt the model saw this turn. */
-  context: number;
+  cacheRead: number | null;
+  /** `input + cacheRead` — the whole prompt the model saw. Null for a hole. */
+  context: number | null;
   /** `cacheRead / context`, or null when the turn reported no prompt at all. */
   cacheRate: number | null;
 }

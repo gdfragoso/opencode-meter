@@ -379,8 +379,9 @@ export function findModelsAggregated(
 
 export interface ContextTurnRow {
   id: number;
-  input: number;
-  cache_read: number;
+  /** Null when the turn carried no token accounting at all. */
+  input: number | null;
+  cache_read: number | null;
 }
 
 /**
@@ -394,9 +395,13 @@ export interface ContextTurnRow {
 export function findContextTurns(db: Database, sessionID: string): ContextTurnRow[] {
   return db
     .query<ContextTurnRow, [string]>(
+      // Deliberately NOT coalesced to 0: a turn that reported no tokens is a
+      // hole in the series, and drawing it as zero puts a plunge to the axis
+      // where the context never moved. Same reason CacheTimelineChart draws
+      // gaps rather than zeros.
       `SELECT e.id AS id,
-              COALESCE(json_extract(e.data, '$.tokens.input'), 0) AS input,
-              COALESCE(json_extract(e.data, '$.tokens.cache.read'), 0) AS cache_read
+              json_extract(e.data, '$.tokens.input') AS input,
+              json_extract(e.data, '$.tokens.cache.read') AS cache_read
          FROM events e
          JOIN (
            SELECT MIN(id) AS id

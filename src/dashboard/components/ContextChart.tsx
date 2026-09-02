@@ -73,6 +73,9 @@ export default function ContextChart({
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 4,
+          // A turn with no token accounting is a hole, not a zero. Joining
+          // across it would draw a collapse the context never had.
+          spanGaps: false,
           fill: true,
           tension: 0.2,
         },
@@ -84,6 +87,7 @@ export default function ContextChart({
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 4,
+          spanGaps: false,
           fill: true,
           tension: 0.2,
         },
@@ -93,8 +97,8 @@ export default function ContextChart({
 
   const totals = useMemo(() => {
     if (!data || data.turns.length === 0) return null;
-    const cacheRead = data.turns.reduce((sum, t) => sum + t.cacheRead, 0);
-    const input = data.turns.reduce((sum, t) => sum + t.input, 0);
+    const cacheRead = data.turns.reduce((sum, t) => sum + (t.cacheRead ?? 0), 0);
+    const input = data.turns.reduce((sum, t) => sum + (t.input ?? 0), 0);
     const all = cacheRead + input;
     return { cacheRead, input, rate: all > 0 ? cacheRead / all : null };
   }, [data]);
@@ -130,6 +134,7 @@ export default function ContextChart({
           footer: (items: Array<{ dataIndex: number }>) => {
             const turn = data.turns[items[0]?.dataIndex ?? 0];
             if (!turn) return "";
+            if (turn.context === null) return "no tokens recorded for this turn";
             return `context ${fmtNum(turn.context)} · cached ${fmtCacheRate(turn.cacheRate)}`;
           },
         },
