@@ -4,12 +4,18 @@ import type { Chart, Plugin } from "chart.js";
 import { LoadingPlaceholder, EmptyState } from "@/dashboard/components/ui";
 import { fmtNum } from "@/dashboard/lib/format";
 import { chartColors, cyan, magenta, bg, text } from "@/dashboard/lib/colors";
-import type { SessionContextResponse } from "@/data/domain/session";
+import type { SessionContextResponse, SessionContextTurn } from "@/data/domain/session";
 
 /**
- * The prompt the model saw on each turn, split into the part served from cache
- * and the part billed fresh. Stacked, so the height of the band is the context
- * and the split inside it is what that context cost.
+ * The prompt the model saw on each turn: the outer line is the context, the
+ * inner one the part served from cache, and the band between them is what was
+ * billed fresh.
+ *
+ * Two independent series rather than a stack. Stacking drew the same picture,
+ * but Chart.js coerces null to 0 when it sums a stack, so an unmeasured turn
+ * came out as a vertical plunge to the axis no matter what `spanGaps` said.
+ * Plotting the context directly also means the top line is the number, not a
+ * sum the reader has to do.
  *
  * Charting `input` on its own was the original plan and it was wrong: `input`
  * and `cache.read` are disjoint, so `input` alone tracks the size of the delta,
@@ -53,6 +59,44 @@ export function compactionMarks(indices: number[]): Plugin<"line"> {
   };
 }
 
+/**
+ * The two series the chart draws, as data rather than as canvas.
+ *
+ * Exported because the claim worth testing lives here — that the outer line is
+ * the context itself and that an unmeasured turn stays null — and Chart.js
+ * paints the chart onto a canvas the DOM cannot be asked about.
+ */
+export function contextDatasets(turns: SessionContextTurn[]) {
+  return [
+    {
+      label: "Context",
+      data: turns.map((t) => t.context),
+      borderColor: magenta,
+      backgroundColor: "rgba(255, 0, 255, 0.16)",
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      // An unmeasured turn is a hole. Joining across it would draw a collapse
+      // the context never had.
+      spanGaps: false,
+      fill: "origin" as const,
+      tension: 0.2,
+    },
+    {
+      label: "Cached",
+      data: turns.map((t) => t.cacheRead),
+      borderColor: cyan,
+      backgroundColor: "rgba(0, 255, 204, 0.18)",
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      spanGaps: false,
+      fill: "origin" as const,
+      tension: 0.2,
+    },
+  ];
+}
+
 export default function ContextChart({
   data,
   loading,
@@ -64,34 +108,7 @@ export default function ContextChart({
     if (!data || data.turns.length === 0) return null;
     return {
       labels: data.turns.map((_, i) => String(i + 1)),
-      datasets: [
-        {
-          label: "Cached",
-          data: data.turns.map((t) => t.cacheRead),
-          borderColor: cyan,
-          backgroundColor: "rgba(0, 255, 204, 0.18)",
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          // A turn with no token accounting is a hole, not a zero. Joining
-          // across it would draw a collapse the context never had.
-          spanGaps: false,
-          fill: true,
-          tension: 0.2,
-        },
-        {
-          label: "Fresh",
-          data: data.turns.map((t) => t.input),
-          borderColor: magenta,
-          backgroundColor: "rgba(255, 0, 255, 0.18)",
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          spanGaps: false,
-          fill: true,
-          tension: 0.2,
-        },
-      ],
+      datasets: contextDatasets(data.turns),
     };
   }, [data]);
 
@@ -130,7 +147,9 @@ export default function ContextChart({
         callbacks: {
           title: (items: Array<{ dataIndex: number }>) => `Turn ${(items[0]?.dataIndex ?? 0) + 1}`,
           label: (ctx: import("chart.js").TooltipItem<"line">) =>
-            ` ${ctx.dataset.label}: ${fmtNum(ctx.raw as number)}`,
+            ctx.raw === null
+              ? ` ${ctx.dataset.label}: —`
+              : ` ${ctx.dataset.label}: ${fmtNum(ctx.raw as number)}`,
           footer: (items: Array<{ dataIndex: number }>) => {
             const turn = data.turns[items[0]?.dataIndex ?? 0];
             if (!turn) return "";
@@ -150,8 +169,8 @@ export default function ContextChart({
         },
       },
       y: {
-        // Stacked, so the top of the band is input + cacheRead: the context.
-        stacked: true,
+        // Not stacked: the Context series already carries input + cacheRead,
+        // and stacking is what turned an unmeasured turn into a drop to zero.
         beginAtZero: true,
         grid: { color: chartColors.scale.grid.color },
         ticks: {

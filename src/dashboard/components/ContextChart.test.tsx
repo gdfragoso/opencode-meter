@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { cleanup, render, screen } from "@testing-library/react";
-import ContextChart, { fmtCacheRate, compactionMarks } from "./ContextChart";
+import ContextChart, { fmtCacheRate, compactionMarks, contextDatasets } from "./ContextChart";
 import type { SessionContextResponse, SessionContextTurn } from "@/data/domain/session";
 
 afterEach(cleanup);
@@ -124,5 +124,34 @@ describe("ContextChart", () => {
     );
 
     expect(container.textContent).toContain("Dashed rules");
+  });
+});
+
+describe("contextDatasets", () => {
+  // Stacking drew the same picture but made an unmeasured turn render as a
+  // plunge to the axis: Chart.js coerces null to 0 when it sums a stack, so
+  // spanGaps never got a chance. Two independent series, context plotted
+  // directly.
+  it("plots the context itself, not the uncached half of a stack", () => {
+    const [context, cached] = contextDatasets([turn(1_000, 9_000, 1), turn(2_000, 8_000, 2)]);
+
+    expect(context!.label).toBe("Context");
+    expect(context!.data).toEqual([10_000, 10_000]);
+    expect(cached!.label).toBe("Cached");
+    expect(cached!.data).toEqual([9_000, 8_000]);
+  });
+
+  it("carries an unmeasured turn through as null, in place", () => {
+    const hole = { id: 2, input: null, cacheRead: null, context: null, cacheRate: null };
+    const [context, cached] = contextDatasets([turn(1_000, 9_000, 1), hole, turn(1_000, 9_500, 3)]);
+
+    expect(context!.data).toEqual([10_000, null, 10_500]);
+    expect(cached!.data).toEqual([9_000, null, 9_500]);
+  });
+
+  it("breaks the line at a hole rather than joining across it", () => {
+    for (const dataset of contextDatasets([turn(10, 90)])) {
+      expect(dataset.spanGaps).toBe(false);
+    }
   });
 });
