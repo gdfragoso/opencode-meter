@@ -374,3 +374,50 @@ export function findModelsAggregated(
     )
     .all(days, cutoff, project, project, branch, branch);
 }
+
+/* ── context per turn ─────────────────────────────────────────────────── */
+
+export interface ContextTurnRow {
+  id: number;
+  input: number;
+  cache_read: number;
+}
+
+/**
+ * Prompt size per assistant turn, oldest first.
+ *
+ * Deduplicated the same way deriveSessionCounters does — `MIN(id)` per
+ * `messageID` — because `session.idle` fires once per assistant turn, so the
+ * same message.updated is written again on every subsequent turn. Without the
+ * dedup the curve repeats turns and climbs for a reason that is not context.
+ */
+export function findContextTurns(db: Database, sessionID: string): ContextTurnRow[] {
+  return db
+    .query<ContextTurnRow, [string]>(
+      `SELECT e.id AS id,
+              COALESCE(json_extract(e.data, '$.tokens.input'), 0) AS input,
+              COALESCE(json_extract(e.data, '$.tokens.cache.read'), 0) AS cache_read
+         FROM events e
+         JOIN (
+           SELECT MIN(id) AS id
+           FROM events
+           WHERE type = 'message.updated' AND session_id = ?
+             AND json_extract(data, '$.messageID') IS NOT NULL
+           GROUP BY json_extract(data, '$.messageID')
+         ) d ON e.id = d.id
+        ORDER BY e.id`
+    )
+    .all(sessionID);
+}
+
+/** Event ids of every compaction in the session, oldest first. */
+export function findCompactionEventIds(db: Database, sessionID: string): number[] {
+  return db
+    .query<{ id: number }, [string]>(
+      `SELECT id FROM events
+        WHERE type = 'session.compacted' AND session_id = ?
+        ORDER BY id`
+    )
+    .all(sessionID)
+    .map((r) => r.id);
+}

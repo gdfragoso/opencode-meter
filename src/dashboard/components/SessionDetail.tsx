@@ -5,8 +5,10 @@ import { useEvents } from "@/dashboard/hooks/useEvents";
 import { useSessionTools } from "@/dashboard/hooks/useSessionTools";
 import { useSessionFiles } from "@/dashboard/hooks/useSessionFiles";
 import { useSessionTree } from "@/dashboard/hooks/useSessionTree";
+import { useSessionContext } from "@/dashboard/hooks/useSessionContext";
 import GanttChart from "@/dashboard/components/GanttChart";
 import DelegationTree from "@/dashboard/components/DelegationTree";
+import ContextChart from "@/dashboard/components/ContextChart";
 import {
   Section,
   LoadingPlaceholder,
@@ -368,6 +370,10 @@ export default function SessionDetail() {
   // descendants, why each was called, and per-branch totals.
   const { data: tree, loading: treeLoading } = useSessionTree(id);
 
+  // Context per turn: input + cache read, which is the whole prompt. The two
+  // are disjoint, so neither one alone is the context.
+  const { data: context, loading: contextLoading } = useSessionContext(id);
+
   // ── derived data (must be BEFORE early returns — hook count stability) ──
 
   // Skills from events
@@ -590,6 +596,14 @@ export default function SessionDetail() {
       ) : (
         <SessionErrorList events={events ?? []} />
       )}
+
+      {/* Context per turn — how large the prompt got, and how much was cached */}
+      <Section
+        title="Context"
+        meta={context && context.turns.length > 0 ? `(${context.turns.length} turns)` : undefined}
+      >
+        <ContextChart data={context} loading={contextLoading} />
+      </Section>
 
       {/* Delegation tree — who called whom, and what each branch cost */}
       <DelegationTree

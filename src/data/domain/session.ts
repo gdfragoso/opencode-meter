@@ -128,3 +128,39 @@ export interface SessionFilesResponse {
   modified: SessionFileInfo[];
   deleted: SessionFileInfo[];
 }
+
+/* ── context per turn ─────────────────────────────────────────────────────
+   `tokens.input` and `tokens.cache.read` are DISJOINT: `input` is the
+   uncached part of the prompt, `cache.read` the prefix served from cache.
+   The context the model actually saw is their sum. Measured on a real
+   session, plotting `input` alone understated it by roughly 7x — and moved
+   with the size of the delta rather than the size of the context, which is a
+   different quantity wearing the same label.
+   ─────────────────────────────────────────────────────────────────────── */
+
+/** One assistant turn: how much context it carried, and how much was cached. */
+export interface SessionContextTurn {
+  /** Event id. The ordering key, and what compaction marks are placed against. */
+  id: number;
+  /** Uncached prompt tokens. */
+  input: number;
+  /** Prompt tokens served from cache. Disjoint from `input`. */
+  cacheRead: number;
+  /** `input + cacheRead` — the whole prompt the model saw this turn. */
+  context: number;
+  /** `cacheRead / context`, or null when the turn reported no prompt at all. */
+  cacheRate: number | null;
+}
+
+export interface SessionContextResponse {
+  turns: SessionContextTurn[];
+  /**
+   * Indices into `turns`: a compaction happened immediately before that turn.
+   * Indices rather than event ids so the chart can mark a position without
+   * re-deriving the ordering. Empty is the common case — most sessions never
+   * compact.
+   */
+  compactedBefore: number[];
+  /** Largest context reached, for labelling the axis without rescanning. */
+  peakContext: number;
+}

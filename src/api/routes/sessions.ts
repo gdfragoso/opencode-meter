@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { getDb } from "@/data/db/connection";
 import { parseLimit, parseOffset, parseDays } from "@/data/domain/validation";
-import { listSessions, getSessionDetail, getSessionTree, getSessionTypes, getSessionEvents, getSessionTools } from "@/api/services/sessions";
+import { listSessions, getSessionDetail, getSessionTree, getSessionTypes, getSessionEvents, getSessionTools, getSessionContext } from "@/api/services/sessions";
 
 // Same shape as createFilesRoute: the database arrives as an argument so a test
 // can pass an in-memory one instead of mocking the connection module, which
@@ -70,6 +70,14 @@ export function createSessionsRoute(getDbFn?: () => Database): Hono {
     const id = c.req.param("id");
     const events = getSessionEvents(db, id);
     return c.json(events);
+  });
+
+  app.get("/api/sessions/:id/context", (c) => {
+    const db = getDbFor();
+    const id = c.req.param("id");
+    // No 404 for an unknown session: an empty series is the honest answer, and
+    // it is the same answer a real session with no recorded turns gives.
+    return c.json(getSessionContext(db, id));
   });
 
   app.get("/api/sessions/:id/tools", (c) => {

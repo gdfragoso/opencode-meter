@@ -1,12 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type {
-  SessionRow,
-  SubagentRow,
-  SessionFilesResponse,
-  SessionTreeNode,
-  SessionTreeResponse,
-  SessionTreeRow,
-} from "@/data/domain/session";
+import type { SessionRow, SubagentRow, SessionFilesResponse, SessionTreeNode, SessionTreeResponse, SessionTreeRow, SessionContextResponse, SessionContextTurn } from "@/data/domain/session";
 import {
   findAll,
   findById,
@@ -19,6 +12,8 @@ import {
 } from "@/data/repositories/session";
 import { findBySession, findTaskRoutingLabel, findToolsBySession } from "@/data/repositories/event";
 import { findFilesBySession } from "@/data/repositories/files";
+import { findContextTurns, findCompactionEventIds } from "@/data/repositories/event";
+import { cacheHitRate } from "@/api/services/cache-timeline";
 
 export function listSessions(
   db: Database,
@@ -208,4 +203,38 @@ export function getSessionFiles(db: Database, id: string): SessionFilesResponse 
     });
   }
   return groups;
+}
+
+/**
+ * Context size per assistant turn, with the position of each compaction.
+ *
+ * `input` and `cacheRead` are disjoint halves of the same prompt, so the
+ * context is their sum. The hit rate reuses `cacheHitRate` rather than
+ * repeating the formula: one definition of "cached share" for the whole app.
+ */
+export function getSessionContext(db: Database, id: string): SessionContextResponse {
+  const turns: SessionContextTurn[] = findContextTurns(db, id).map((r) => ({
+    id: r.id,
+    input: r.input,
+    cacheRead: r.cache_read,
+    context: r.input + r.cache_read,
+    cacheRate: cacheHitRate(r.cache_read, r.input),
+  }));
+
+  // A compaction sits before the first turn recorded after it. One that
+  // happened after the last turn has nothing to mark, and is dropped rather
+  // than pinned to the end where it would read as a drop that never happened.
+  const compactedBefore = [
+    ...new Set(
+      findCompactionEventIds(db, id)
+        .map((eventId) => turns.findIndex((t) => t.id > eventId))
+        .filter((index) => index !== -1)
+    ),
+  ].sort((a, b) => a - b);
+
+  return {
+    turns,
+    compactedBefore,
+    peakContext: turns.reduce((max, t) => Math.max(max, t.context), 0),
+  };
 }
