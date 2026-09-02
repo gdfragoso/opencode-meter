@@ -20,12 +20,25 @@ jobs:
     permissions:
       contents: write
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
+      # The release commits CHANGELOG.md and package.json back to main, which
+      # is protected. The default token is refused there, which is why the
+      # branch used to be opened by hand for every release. Authenticating as
+      # an app that is allowed through keeps it protected throughout.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          # Checkout persists this token in the local git config, which is
+          # what @semantic-release/git pushes with. Passing it only to
+          # semantic-release below is not enough.
+          token: ${{ steps.app-token.outputs.token }}
           # semantic-release reads the tags to know what the last release was,
           # and the commits since it to decide the next version. The default
           # shallow checkout has neither. The first release survived that by
@@ -42,3 +55,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: npx semantic-release
+        env:
+          # Both halves need the App: @semantic-release/git for the push and
+          # @semantic-release/github for the release and its notes.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
